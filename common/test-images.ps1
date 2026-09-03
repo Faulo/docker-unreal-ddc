@@ -149,6 +149,29 @@ function Assert-StartedVersion {
     }
 }
 
+function Get-CacheEntryCount {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Container,
+
+        [Parameter(Mandatory)]
+        [string] $Zen
+    )
+
+    $output = Invoke-DockerOutput @(
+        'exec', $Container, $Zen,
+        'cache-info',
+        '--hosturl', 'http://127.0.0.1:8558',
+        '--namespace', 'integration.ddc',
+        '--bucket', 'persistence'
+    )
+    $match = [Regex]::Match($output, '"DiskEntryCount"\s*:\s*(?<count>\d+)')
+    if (-not $match.Success) {
+        throw "Zen cache-info did not report DiskEntryCount:`n$output"
+    }
+    return [long] $match.Groups['count'].Value
+}
+
 $daemonOs = Invoke-DockerOutput @('version', '--format', '{{.Server.Os}}')
 if ($daemonOs -ne $ExpectedOs) {
     throw "Docker context '$DockerContext' targets '$daemonOs', expected '$ExpectedOs'"
@@ -251,16 +274,20 @@ try {
     )
     Invoke-Docker @(
         'exec', $container, $firstZen,
-        'bench', 'cacheload',
+        'cache-gen',
         '--hosturl', 'http://127.0.0.1:8558',
         '--namespace', 'integration.ddc',
         '--bucket', 'persistence',
-        '--sizes', '4KiB:60,64KiB:30,1MiB:10',
         '--count', '64',
-        '--seed', '20260903',
-        '--concurrency', '8',
-        '--seed-only'
+        '--min-size', '4096',
+        '--max-size', '1048576',
+        '--min-attachments', '0',
+        '--max-attachments', '0'
     )
+    $seededEntryCount = Get-CacheEntryCount $container $firstZen
+    if ($seededEntryCount -lt 64) {
+        throw "Zen cache contains only $seededEntryCount entries after seeding"
+    }
 
     Assert-CleanStop $container
     Remove-TestContainer $container
@@ -280,19 +307,10 @@ try {
     Wait-ContainerHealthy $container
     Invoke-Docker @('exec', $container, $launcher, '--health')
     Assert-StartedVersion $container $latest.Version
-    Invoke-Docker @(
-        'exec', $container, $secondZen,
-        'bench', 'cacheload',
-        '--hosturl', 'http://127.0.0.1:8558',
-        '--namespace', 'integration.ddc',
-        '--bucket', 'persistence',
-        '--sizes', '4KiB:60,64KiB:30,1MiB:10',
-        '--count', '64',
-        '--seed', '20260903',
-        '--concurrency', '8',
-        '--requests', '512',
-        '--skip-seed'
-    )
+    $upgradedEntryCount = Get-CacheEntryCount $container $secondZen
+    if ($upgradedEntryCount -lt $seededEntryCount) {
+        throw "Zen cache lost entries during upgrade: $seededEntryCount before, $upgradedEntryCount after"
+    }
     Assert-CleanStop $container
     Remove-TestContainer $container
 } finally {
