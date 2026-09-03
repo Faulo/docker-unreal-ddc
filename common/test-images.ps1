@@ -203,8 +203,8 @@ $previousMinor = $releases |
 if ($null -eq $previousMinor) {
     throw 'The contract requires at least two stable Zen minor lines in major version 5'
 }
-$firstSelector = "$($previousMinor.Version.Major).$($previousMinor.Version.Minor)"
 $firstVersion = ($releases | Where-Object { $_.Version.Major -eq $previousMinor.Version.Major -and $_.Version.Minor -eq $previousMinor.Version.Minor } | Select-Object -First 1).Version
+$firstSelector = "=$firstVersion"
 $secondSelector = $latest.Version.Major.ToString()
 $firstZen = "$installPath/v$firstVersion/$platformName/$clientName"
 $secondZen = "$installPath/v$($latest.Version)/$platformName/$clientName"
