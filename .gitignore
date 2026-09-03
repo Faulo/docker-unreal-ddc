@@ -1,0 +1,10 @@
+# .NET build outputs
+**/bin/
+**/obj/
+
+# IDE state
+.idea/
+*.DotSettings.user
+
+# Local benchmark output
+benchmark-results/
