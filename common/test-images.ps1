@@ -81,6 +81,74 @@ function Remove-TestContainer {
     }
 }
 
+function Get-ZenReleases {
+    $headers = @{
+        Accept = 'application/vnd.github+json'
+        Authorization = "Bearer $env:UNREAL_CREDENTIALS_PSW"
+        'X-GitHub-Api-Version' = '2022-11-28'
+        'User-Agent' = 'docker-unreal-ddc-contract'
+    }
+    $releases = Invoke-RestMethod -Headers $headers -Uri 'https://api.github.com/repos/EpicGames/zen/releases?per_page=100'
+    return @(
+        $releases |
+            Where-Object { -not $_.draft -and -not $_.prerelease -and $_.tag_name -match '^v(?<version>\d+\.\d+\.\d+)$' } |
+            ForEach-Object {
+                [pscustomobject]@{
+                    Tag = $_.tag_name
+                    Version = [Version] $Matches.version
+                }
+            } |
+            Sort-Object Version -Descending
+    )
+}
+
+function Assert-CleanStop {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Container
+    )
+
+    Invoke-Docker @('stop', '--timeout', '30', $Container)
+    $state = Invoke-DockerOutput @('inspect', '--format', '{{json .State}}', $Container) | ConvertFrom-Json
+    if ($state.Status -ne 'exited' -or $state.ExitCode -ne 0 -or $state.OOMKilled) {
+        throw "Container $Container did not stop cleanly: $($state | ConvertTo-Json -Compress)"
+    }
+}
+
+function Get-ZenCommandLine {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Container
+    )
+
+    if ($ExpectedOs -eq 'windows') {
+        $script = '$process = Get-CimInstance Win32_Process | Where-Object Name -EQ "zenserver.exe" | Select-Object -First 1; if ($null -eq $process) { exit 1 }; $process.CommandLine'
+        return Invoke-DockerOutput @('exec', $Container, 'powershell', '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', $script)
+    }
+
+    $script = 'for file in /proc/[0-9]*/comm; do if [ "$(cat "$file")" = "zenserver" ]; then directory="${file%/comm}"; tr "\000" "\n" < "$directory/cmdline"; exit 0; fi; done; exit 1'
+    return Invoke-DockerOutput @('exec', $Container, 'sh', '-c', $script)
+}
+
+function Assert-StartedVersion {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Container,
+
+        [Parameter(Mandatory)]
+        [Version] $ExpectedVersion
+    )
+
+    $logs = Invoke-DockerOutput @('logs', $Container)
+    if ($logs -notmatch "docker-unreal-ddc: starting Epic Zen $([Regex]::Escape($ExpectedVersion.ToString()))(?:\s|$)") {
+        throw "Container $Container did not start expected Zen $ExpectedVersion`n$logs"
+    }
+    $zenLines = @($logs -split "`r?`n" | Where-Object { $_ -and -not $_.StartsWith('docker-unreal-ddc:') })
+    if ($zenLines.Count -eq 0) {
+        throw "Container $Container did not mirror any Zen log output`n$logs"
+    }
+}
+
 $daemonOs = Invoke-DockerOutput @('version', '--format', '{{.Server.Os}}')
 if ($daemonOs -ne $ExpectedOs) {
     throw "Docker context '$DockerContext' targets '$daemonOs', expected '$ExpectedOs'"
@@ -90,21 +158,56 @@ if ($Pull) {
     Invoke-Docker @('pull', $Image)
 }
 
+$configuration = Invoke-DockerOutput @('image', 'inspect', '--format', '{{json .Config}}', $Image) | ConvertFrom-Json
+if (@($configuration.Cmd).Count -ne 0) {
+    throw "Image $Image must have an empty CMD"
+}
+if (@($configuration.Env | Where-Object { $_ -like 'ZEN_RELEASE_VERSION=*' }).Count -ne 0) {
+    throw "Image $Image still exposes obsolete ZEN_RELEASE_VERSION"
+}
+if (@($configuration.Env | Where-Object { $_ -like 'ZEN_VERSION=*' }).Count -ne 1) {
+    throw "Image $Image must expose exactly one default ZEN_VERSION"
+}
+
 $id = [Guid]::NewGuid().ToString('N').Substring(0, 12)
 $container = "unreal-ddc-test-$id"
 $installVolume = "unreal-ddc-test-$id-install"
 $dataVolume = "unreal-ddc-test-$id-data"
-$releaseVersion = 'v5.8.20'
-
 if ($ExpectedOs -eq 'windows') {
     $installPath = 'C:/unreal-ddc/install'
     $dataPath = 'C:/unreal-ddc/data'
-    $zen = "C:/unreal-ddc/install/$releaseVersion/windows/zen.exe"
+    $launcher = 'C:/unreal-ddc/UnrealDDC.exe'
+    $platformName = 'windows'
+    $clientName = 'zen.exe'
 } else {
     $installPath = '/unreal-ddc/install'
     $dataPath = '/unreal-ddc/data'
-    $zen = "/unreal-ddc/install/$releaseVersion/linux/zen"
+    $launcher = '/unreal-ddc/UnrealDDC'
+    $platformName = 'linux'
+    $clientName = 'zen'
 }
+
+$expectedHealthcheck = @('CMD', $launcher, '--health')
+if (Compare-Object @($configuration.Healthcheck.Test) $expectedHealthcheck -SyncWindow 0) {
+    throw "Image $Image must use '$launcher --health' as its healthcheck"
+}
+
+$releases = Get-ZenReleases
+$latest = $releases | Where-Object { $_.Version.Major -eq 5 } | Select-Object -First 1
+if ($null -eq $latest) {
+    throw 'The contract requires a stable Zen release in major version 5'
+}
+$previousMinor = $releases |
+    Where-Object { $_.Version.Major -eq $latest.Version.Major -and $_.Version.Minor -lt $latest.Version.Minor } |
+    Select-Object -First 1
+if ($null -eq $previousMinor) {
+    throw 'The contract requires at least two stable Zen minor lines in major version 5'
+}
+$firstSelector = "$($previousMinor.Version.Major).$($previousMinor.Version.Minor)"
+$firstVersion = ($releases | Where-Object { $_.Version.Major -eq $previousMinor.Version.Major -and $_.Version.Minor -eq $previousMinor.Version.Minor } | Select-Object -First 1).Version
+$secondSelector = $latest.Version.Major.ToString()
+$firstZen = "$installPath/v$firstVersion/$platformName/$clientName"
+$secondZen = "$installPath/v$($latest.Version)/$platformName/$clientName"
 
 try {
     Invoke-Docker @('volume', 'create', $installVolume)
@@ -115,26 +218,38 @@ try {
         '--name', $container,
         '--env', 'UNREAL_CREDENTIALS_USR',
         '--env', 'UNREAL_CREDENTIALS_PSW',
+        '--env', "ZEN_VERSION=$firstSelector",
+        '--env', 'ZEN_GC_DISKSIZE_SOFTLIMIT=100GB',
+        '--env', 'ZEN_GC_LOW_DISKSPACE_THRESHOLD=1000MB',
+        '--env', 'ZEN_GC_CACHE_DURATION_SECONDS=1Y60S',
         '--volume', "${installVolume}:${installPath}",
         '--volume', "${dataVolume}:${dataPath}",
         $Image
     )
     Wait-ContainerHealthy $container
 
-    $version = Invoke-DockerOutput @('exec', $container, $zen, 'version', 'http://127.0.0.1:8558')
-    if ($version -ne '5.8.20') {
-        throw "Unexpected Zen version: expected '5.8.20', got '$version'"
+    Invoke-Docker @('exec', $container, $launcher, '--health')
+    Assert-StartedVersion $container $firstVersion
+    $commandLine = Get-ZenCommandLine $container
+    foreach ($expectedArgument in @(
+        '--gc-disksize-softlimit=100000000000',
+        '--gc-low-diskspace-threshold=1000000000',
+        '--gc-cache-duration-seconds=31536060'
+    )) {
+        if (-not $commandLine.Contains($expectedArgument)) {
+            throw "Zen command line does not contain '$expectedArgument': $commandLine"
+        }
     }
 
     Invoke-Docker @(
-        'exec', $container, $zen,
+        'exec', $container, $firstZen,
         'bench', 'http',
         '--url', 'http://127.0.0.1:8558/health/ready',
         '--count', '20',
         '--concurrency', '4'
     )
     Invoke-Docker @(
-        'exec', $container, $zen,
+        'exec', $container, $firstZen,
         'bench', 'cacheload',
         '--hosturl', 'http://127.0.0.1:8558',
         '--namespace', 'integration.ddc',
@@ -146,21 +261,26 @@ try {
         '--seed-only'
     )
 
-    Invoke-Docker @('stop', '--timeout', '30', $container)
+    Assert-CleanStop $container
     Remove-TestContainer $container
 
-    # The second start deliberately receives no credentials. It proves both the
-    # verified installation and the seeded cache survive container replacement.
+    # The second start broadens the selector and must discover and install the
+    # newest compatible release while retaining the seeded cache.
     Invoke-Docker @(
         'run', '--detach',
         '--name', $container,
+        '--env', 'UNREAL_CREDENTIALS_USR',
+        '--env', 'UNREAL_CREDENTIALS_PSW',
+        '--env', "ZEN_VERSION=$secondSelector",
         '--volume', "${installVolume}:${installPath}",
         '--volume', "${dataVolume}:${dataPath}",
         $Image
     )
     Wait-ContainerHealthy $container
+    Invoke-Docker @('exec', $container, $launcher, '--health')
+    Assert-StartedVersion $container $latest.Version
     Invoke-Docker @(
-        'exec', $container, $zen,
+        'exec', $container, $secondZen,
         'bench', 'cacheload',
         '--hosturl', 'http://127.0.0.1:8558',
         '--namespace', 'integration.ddc',
@@ -172,6 +292,8 @@ try {
         '--requests', '512',
         '--skip-seed'
     )
+    Assert-CleanStop $container
+    Remove-TestContainer $container
 } finally {
     Remove-TestContainer $container
     foreach ($volume in @($installVolume, $dataVolume)) {
