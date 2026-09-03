@@ -146,7 +146,7 @@ try {
         '--seed-only'
     )
 
-    Invoke-Docker @('stop', '--time', '30', $container)
+    Invoke-Docker @('stop', '--timeout', '30', $container)
     Remove-TestContainer $container
 
     # The second start deliberately receives no credentials. It proves both the

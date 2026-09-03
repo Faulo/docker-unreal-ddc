@@ -1,0 +1,14 @@
+**
+!common/
+!common/UnrealDDC/
+!common/UnrealDDC/**
+common/UnrealDDC/bin/
+common/UnrealDDC/bin/**
+common/UnrealDDC/obj/
+common/UnrealDDC/obj/**
+.git/
+.git/**
+!linux/
+!linux/Dockerfile
+!windows/
+!windows/Dockerfile

@@ -1,0 +1,76 @@
+name: Docker
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - common/**
+      - linux/**
+      - windows/**
+      - .env
+      - .github/workflows/docker.yml
+      - Directory.Build.props
+      - docker-unreal-ddc.sln
+      - global.json
+  workflow_dispatch:
+  schedule:
+    - cron: "29 3 1 * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-publish
+  cancel-in-progress: false
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - windows-2022
+    runs-on: ${{matrix.os}}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 9.0.x
+      - name: Restore
+        run: dotnet restore docker-unreal-ddc.sln
+      - name: Test
+        run: dotnet test docker-unreal-ddc.sln --configuration Release --no-restore
+
+  configuration:
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      image: ${{steps.image.outputs.DOCKER_IMAGE}}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read image name
+        id: image
+        shell: bash
+        run: grep -m1 '^DOCKER_IMAGE=' .env >> "${GITHUB_OUTPUT}"
+
+  publish:
+    needs: configuration
+    uses: Faulo/workflows-docker/.github/workflows/publish.yml@v1
+    with:
+      image: ${{needs.configuration.outputs.image}}
+      linux_context: .
+      windows_context: .
+      windows_variants: >-
+        [
+          {"tag":"windows-ltsc2019","build_args":{"OS_BASE":"ltsc2019"}}
+        ]
+    secrets:
+      DOCKERHUB_USERNAME: ${{secrets.DOCKERHUB_USERNAME}}
+      DOCKERHUB_TOKEN: ${{secrets.DOCKERHUB_TOKEN}}
