@@ -8,16 +8,18 @@ using System.Threading.Tasks;
 
 namespace UnrealDDC;
 
-sealed record ZenInstallation(string Directory, string Server, string Client);
+sealed record ZenInstallation(string directory, string server, string client, Version version);
 
 sealed record ZenInstallationMarker(
-    string Release,
-    string Platform,
-    string Asset,
-    string ArchiveSha256,
-    string ServerSha256,
-    string ClientSha256
+    string release,
+    string platform,
+    string asset,
+    string archiveSha256,
+    string serverSha256,
+    string clientSha256
 );
+
+sealed record ZenActiveInstallation(string release, string platform, string serverFile, string clientFile, string version);
 
 sealed class ZenInstaller(
     string installRoot,
@@ -27,56 +29,53 @@ sealed class ZenInstaller(
 ) {
     const string MARKER_NAME = ".docker-unreal-ddc.json";
 
-    readonly ZenReleaseAsset _asset = release.AssetFor(platform);
-    readonly string _platformName = platform switch {
-        EZenPlatform.Linux => "linux",
-        EZenPlatform.Windows => "windows",
+    readonly ZenReleaseAsset asset = release.AssetFor(platform);
+    readonly string platformName = platform switch {
+        EZenPlatform.LINUX => "linux",
+        EZenPlatform.WINDOWS => "windows",
         _ => throw new ArgumentOutOfRangeException(nameof(platform), platform, "Unsupported Zen platform")
     };
 
-    string InstallationDirectory => Path.Combine(installRoot, release.Tag, _platformName);
+    string installationDirectory => Path.Combine(installRoot, release.tag, platformName);
 
-    public async Task<ZenInstallation> PrepareAsync(GitHubCredentials? credentials, CancellationToken cancellationToken = default) {
+    public async Task<ZenInstallation> PrepareAsync(GitHubCredentials credentials, CancellationToken cancellationToken = default) {
         var existing = ValidateInstallation();
         if (existing is not null) {
+            await ActivateAsync(existing, cancellationToken);
             return existing;
         }
 
-        using var installationLock = InstallationLock.Acquire(Path.Combine(installRoot, ".docker-unreal-ddc.lock"));
+        using var installationLock = InstallationLock.Acquire(Path.Combine(installRoot, ".docker-unreal-ddc.lock"), cancellationToken);
         existing = ValidateInstallation();
         if (existing is not null) {
+            await ActivateAsync(existing, cancellationToken);
             return existing;
-        }
-        if (credentials is null) {
-            throw new InvalidOperationException(
-                $"Zen {release.Version} is not installed; supply {EnvironmentVariableNames.UNREAL_CREDENTIALS_USR} and {EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW} for the first start"
-            );
         }
 
         Directory.CreateDirectory(installRoot);
-        string staging = Path.Combine(installRoot, $".staging-{release.Tag}-{_platformName}-{Guid.NewGuid():N}");
+        string staging = Path.Combine(installRoot, $".staging-{release.tag}-{platformName}-{Guid.NewGuid():N}");
         Directory.CreateDirectory(staging);
         try {
-            string archivePath = Path.Combine(staging, _asset.Name);
-            Console.Out.WriteLine($"docker-unreal-ddc: downloading Epic Zen {release.Version} for {_platformName}");
-            await downloader.DownloadAsync(_asset, credentials, archivePath, cancellationToken);
+            string archivePath = Path.Combine(staging, asset.name);
+            await Console.Out.WriteLineAsync($"docker-unreal-ddc: downloading Epic Zen {release.version} for {platformName}");
+            await downloader.DownloadAsync(asset, credentials, archivePath, cancellationToken);
             string archiveHash = HashFile(archivePath);
-            if (!string.Equals(archiveHash, _asset.ArchiveSha256, StringComparison.OrdinalIgnoreCase)) {
-                throw new InvalidDataException($"Zen archive checksum mismatch: expected {_asset.ArchiveSha256}, got {archiveHash}");
+            if (!string.Equals(archiveHash, asset.archiveSha256, StringComparison.OrdinalIgnoreCase)) {
+                throw new InvalidDataException($"Zen archive checksum mismatch: expected {asset.archiveSha256}, got {archiveHash}");
             }
 
-            string serverPath = Path.Combine(staging, _asset.ServerFile);
-            string clientPath = Path.Combine(staging, _asset.ClientFile);
-            await ExtractAsync(archivePath, _asset.ServerFile, serverPath, cancellationToken);
-            await ExtractAsync(archivePath, _asset.ClientFile, clientPath, cancellationToken);
+            string serverPath = Path.Combine(staging, asset.serverFile);
+            string clientPath = Path.Combine(staging, asset.clientFile);
+            await ExtractAsync(archivePath, asset.serverFile, serverPath, cancellationToken);
+            await ExtractAsync(archivePath, asset.clientFile, clientPath, cancellationToken);
             File.Delete(archivePath);
             MakeExecutable(serverPath);
             MakeExecutable(clientPath);
 
             var marker = new ZenInstallationMarker(
-                release.Version,
-                _platformName,
-                _asset.Name,
+                release.version.ToString(),
+                platformName,
+                asset.name,
                 archiveHash,
                 HashFile(serverPath),
                 HashFile(clientPath)
@@ -87,29 +86,35 @@ sealed class ZenInstaller(
                 cancellationToken
             );
 
-            string destination = InstallationDirectory;
+            string destination = installationDirectory;
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             if (Directory.Exists(destination)) {
                 Directory.Delete(destination, true);
             }
             Directory.Move(staging, destination);
-            Console.Out.WriteLine($"docker-unreal-ddc: installed Epic Zen {release.Version} for {_platformName}");
-        } catch {
-            if (Directory.Exists(staging)) {
-                Directory.Delete(staging, true);
+            await Console.Out.WriteLineAsync($"docker-unreal-ddc: installed Epic Zen {release.version} for {platformName}");
+        } catch (Exception exception) {
+            try {
+                if (Directory.Exists(staging)) {
+                    Directory.Delete(staging, true);
+                }
+            } catch (Exception cleanupException) {
+                throw new AggregateException("Zen installation and staging cleanup both failed", exception, cleanupException);
             }
             throw;
         }
 
-        return ValidateInstallation()
-               ?? throw new InvalidDataException("The published Zen installation failed validation");
+        var installation = ValidateInstallation()
+                           ?? throw new InvalidDataException("The published Zen installation failed validation");
+        await ActivateAsync(installation, cancellationToken);
+        return installation;
     }
 
     ZenInstallation? ValidateInstallation() {
-        string directory = InstallationDirectory;
+        string directory = installationDirectory;
         string markerPath = Path.Combine(directory, MARKER_NAME);
-        string serverPath = Path.Combine(directory, _asset.ServerFile);
-        string clientPath = Path.Combine(directory, _asset.ClientFile);
+        string serverPath = Path.Combine(directory, asset.serverFile);
+        string clientPath = Path.Combine(directory, asset.clientFile);
         if (!File.Exists(markerPath) || !File.Exists(serverPath) || !File.Exists(clientPath)) {
             return null;
         }
@@ -117,12 +122,12 @@ sealed class ZenInstaller(
         try {
             var marker = JsonSerializer.Deserialize<ZenInstallationMarker>(File.ReadAllText(markerPath));
             if (marker is null
-                || !string.Equals(marker.Release, release.Version, StringComparison.Ordinal)
-                || !string.Equals(marker.Platform, _platformName, StringComparison.Ordinal)
-                || !string.Equals(marker.Asset, _asset.Name, StringComparison.Ordinal)
-                || !string.Equals(marker.ArchiveSha256, _asset.ArchiveSha256, StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(marker.ServerSha256, HashFile(serverPath), StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(marker.ClientSha256, HashFile(clientPath), StringComparison.OrdinalIgnoreCase)) {
+                || !string.Equals(marker.release, release.version.ToString(), StringComparison.Ordinal)
+                || !string.Equals(marker.platform, platformName, StringComparison.Ordinal)
+                || !string.Equals(marker.asset, asset.name, StringComparison.Ordinal)
+                || !string.Equals(marker.archiveSha256, asset.archiveSha256, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(marker.serverSha256, HashFile(serverPath), StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(marker.clientSha256, HashFile(clientPath), StringComparison.OrdinalIgnoreCase)) {
                 return null;
             }
         } catch (IOException) {
@@ -131,8 +136,55 @@ sealed class ZenInstaller(
             return null;
         }
 
-        return new ZenInstallation(directory, serverPath, clientPath);
+        return new ZenInstallation(directory, serverPath, clientPath, release.version);
     }
+
+    async Task ActivateAsync(ZenInstallation installation, CancellationToken cancellationToken) {
+        Directory.CreateDirectory(installRoot);
+        string activePath = ActivePath(installRoot, platform);
+        string temporaryPath = activePath + $".{Guid.NewGuid():N}.tmp";
+        var active = new ZenActiveInstallation(release.tag, platformName, asset.serverFile, asset.clientFile, installation.version.ToString());
+        try {
+            await File.WriteAllTextAsync(temporaryPath, JsonSerializer.Serialize(active), cancellationToken);
+            File.Move(temporaryPath, activePath, true);
+        } finally {
+            File.Delete(temporaryPath);
+        }
+    }
+
+    public static ZenInstallation ReadActive(string installRoot, EZenPlatform platform) {
+        string platformName = platform switch {
+            EZenPlatform.LINUX => "linux",
+            EZenPlatform.WINDOWS => "windows",
+            _ => throw new ArgumentOutOfRangeException(nameof(platform), platform, "Unsupported Zen platform")
+        };
+        string path = ActivePath(installRoot, platform);
+        var active = JsonSerializer.Deserialize<ZenActiveInstallation>(File.ReadAllText(path))
+                     ?? throw new InvalidDataException("The active Zen installation marker is empty");
+        if (!string.Equals(active.platform, platformName, StringComparison.Ordinal)
+            || Path.GetFileName(active.release) != active.release
+            || Path.GetFileName(active.serverFile) != active.serverFile
+            || Path.GetFileName(active.clientFile) != active.clientFile
+            || !Version.TryParse(active.version, out var version)) {
+            throw new InvalidDataException("The active Zen installation marker is invalid");
+        }
+        string directory = Path.Combine(installRoot, active.release, platformName);
+        string server = Path.Combine(directory, active.serverFile);
+        string client = Path.Combine(directory, active.clientFile);
+        if (!File.Exists(server) || !File.Exists(client)) {
+            throw new InvalidDataException("The active Zen installation is incomplete");
+        }
+        return new ZenInstallation(directory, server, client, version);
+    }
+
+    static string ActivePath(string installRoot, EZenPlatform platform) => Path.Combine(
+        installRoot,
+        platform switch {
+            EZenPlatform.LINUX => ".docker-unreal-ddc-active-linux.json",
+            EZenPlatform.WINDOWS => ".docker-unreal-ddc-active-windows.json",
+            _ => throw new ArgumentOutOfRangeException(nameof(platform), platform, "Unsupported Zen platform")
+        }
+    );
 
     static async Task ExtractAsync(string archivePath, string entryName, string destination, CancellationToken cancellationToken) {
         using var archive = ZipFile.OpenRead(archivePath);

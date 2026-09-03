@@ -5,26 +5,26 @@ namespace UnrealDDC.Tests;
 
 [NonParallelizable]
 public sealed class GitHubCredentialsTests {
-    string? _originalUsername;
-    string? _originalToken;
+    string? originalUsername;
+    string? originalToken;
 
     [SetUp]
     public void SaveEnvironment() {
-        _originalUsername = Environment.GetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR);
-        _originalToken = Environment.GetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW);
+        originalUsername = Environment.GetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR);
+        originalToken = Environment.GetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW);
     }
 
     [TearDown]
     public void RestoreEnvironment() {
-        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR, _originalUsername);
-        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW, _originalToken);
+        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR, originalUsername);
+        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW, originalToken);
     }
 
     [Test]
-    public void AllowsCredentialsToBeOmittedAfterInstallation() {
+    public void RequiresCredentialsForUpdateCheck() {
         Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR, null);
         Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW, null);
-        Assert.That(GitHubCredentials.FromEnvironment(), Is.Null);
+        Assert.That(GitHubCredentials.FromEnvironment, Throws.InvalidOperationException);
     }
 
     [TestCase("user", null)]
@@ -39,10 +39,10 @@ public sealed class GitHubCredentialsTests {
     public void TrimsCredentialValues() {
         Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR, "  user  ");
         Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW, "  token  ");
-        var credentials = GitHubCredentials.FromEnvironment()!;
+        var credentials = GitHubCredentials.FromEnvironment();
         Assert.Multiple(() => {
-            Assert.That(credentials.Username, Is.EqualTo("user"));
-            Assert.That(credentials.Token, Is.EqualTo("token"));
+            Assert.That(credentials.username, Is.EqualTo("user"));
+            Assert.That(credentials.token, Is.EqualTo("token"));
         });
     }
 }

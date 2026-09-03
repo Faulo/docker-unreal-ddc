@@ -26,7 +26,7 @@ COPY --from=launcher --chown=10001:10001 /out/UnrealDDC /unreal-ddc/UnrealDDC
 
 ENV UNREAL_DDC_ROOT=/unreal-ddc
 ENV HOME=/unreal-ddc
-ENV ZEN_RELEASE_VERSION=5.8.20
+ENV ZEN_VERSION=5
 
 USER 10001:10001
 WORKDIR /unreal-ddc
@@ -37,7 +37,7 @@ VOLUME ["/unreal-ddc/install", "/unreal-ddc/data"]
 EXPOSE 8558
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-    CMD ["/unreal-ddc/install/v5.8.20/linux/zen", "version", "http://127.0.0.1:8558"]
+    CMD ["/unreal-ddc/UnrealDDC", "--health"]
 
 ENTRYPOINT ["/unreal-ddc/UnrealDDC"]
-CMD ["--dedicated", "--port=8558", "--data-dir=/unreal-ddc/data", "--http=asio", "--no-sentry", "--no-log-file", "--detach=false", "--status-panel=false", "--enable-execution-history=false", "--register-server=false"]
+CMD []

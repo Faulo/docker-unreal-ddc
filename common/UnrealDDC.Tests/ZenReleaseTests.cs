@@ -1,28 +1,31 @@
+using System;
 using NUnit.Framework;
 
 namespace UnrealDDC.Tests;
 
 public sealed class ZenReleaseTests {
-    [Test]
-    public void PinsCurrentStableReleaseAndEpicDigests() {
-        Assert.Multiple(() => {
-            Assert.That(ZenRelease.Pinned.Tag, Is.EqualTo("v5.8.20"));
-            Assert.That(ZenRelease.Pinned.Version, Is.EqualTo("5.8.20"));
-            Assert.That(ZenRelease.Pinned.Linux.Name, Is.EqualTo("zenserver-linux.zip"));
-            Assert.That(ZenRelease.Pinned.Linux.ArchiveSha256, Is.EqualTo("fe3926e7c1cc27352a10ce3a0771b6d1334a77394f105dd5fb468a47513164cf"));
-            Assert.That(ZenRelease.Pinned.Windows.Name, Is.EqualTo("zenserver-win64.zip"));
-            Assert.That(ZenRelease.Pinned.Windows.ArchiveSha256, Is.EqualTo("1dc0c68e613162e6a2d29d96a0bae52121922a9eb804966ce7b98ba181de999b"));
-        });
-    }
-
     [TestCase(0, "zenserver", "zen")]
     [TestCase(1, "zenserver.exe", "zen.exe")]
     public void SelectsNativeServerAndClient(int platformValue, string server, string client) {
         var platform = (EZenPlatform)platformValue;
-        var asset = ZenRelease.Pinned.AssetFor(platform);
+        var linux = new ZenReleaseAsset(1, "linux.zip", "hash", "zenserver", "zen");
+        var windows = new ZenReleaseAsset(2, "windows.zip", "hash", "zenserver.exe", "zen.exe");
+        var asset = new ZenRelease("v5.8.20", new Version(5, 8, 20), linux, windows).AssetFor(platform);
         Assert.Multiple(() => {
-            Assert.That(asset.ServerFile, Is.EqualTo(server));
-            Assert.That(asset.ClientFile, Is.EqualTo(client));
+            Assert.That(asset.serverFile, Is.EqualTo(server));
+            Assert.That(asset.clientFile, Is.EqualTo(client));
         });
+    }
+
+    [TestCase("5", "5.0.0", true)]
+    [TestCase("5", "5.99.1", true)]
+    [TestCase("5", "6.0.0", false)]
+    [TestCase("5.8", "5.9.0", true)]
+    [TestCase("^5.8.20", "5.8.19", false)]
+    [TestCase("^5.8.20", "5.10.0", true)]
+    [TestCase("=5.7.4", "5.7.4", true)]
+    [TestCase("=5.7.4", "5.7.5", false)]
+    public void ParsesImplicitAndExplicitVersionRanges(string expression, string candidate, bool expected) {
+        Assert.That(ZenVersionRange.Parse(expression).Contains(Version.Parse(candidate)), Is.EqualTo(expected));
     }
 }

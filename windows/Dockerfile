@@ -25,7 +25,7 @@ RUN New-Item -ItemType Directory -Path C:/unreal-ddc, C:/unreal-ddc/install, C:/
 COPY --from=launcher C:/out/UnrealDDC.exe C:/unreal-ddc/UnrealDDC.exe
 
 ENV UNREAL_DDC_ROOT="C:\unreal-ddc"
-ENV ZEN_RELEASE_VERSION=5.8.20
+ENV ZEN_VERSION=5
 
 WORKDIR C:/unreal-ddc
 RUN C:/unreal-ddc/UnrealDDC.exe --launcher-version; `
@@ -35,7 +35,7 @@ VOLUME ["C:/unreal-ddc/install", "C:/unreal-ddc/data"]
 EXPOSE 8558
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 `
-    CMD ["C:/unreal-ddc/install/v5.8.20/windows/zen.exe", "version", "http://127.0.0.1:8558"]
+    CMD ["C:/unreal-ddc/UnrealDDC.exe", "--health"]
 
 ENTRYPOINT ["C:/unreal-ddc/UnrealDDC.exe"]
-CMD ["--dedicated", "--port=8558", "--data-dir=C:/unreal-ddc/data", "--http=httpsys", "--no-sentry", "--no-log-file", "--detach=false", "--status-panel=false", "--enable-execution-history=false", "--register-server=false"]
+CMD []

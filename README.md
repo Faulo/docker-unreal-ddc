@@ -1,20 +1,21 @@
 # Unreal DDC Docker Image
 
-`faulo/unreal-ddc` runs Epic's Zen Storage Server as a persistent shared Unreal Engine Derived Data Cache (DDC). The image supports Linux amd64 and Windows amd64 on Server 2019, exposes Zen on port 8558, and reports Docker health from Zen's readiness endpoint.
+`faulo/unreal-ddc` runs Epic's Zen Storage Server as a persistent shared Unreal Engine Derived Data Cache (DDC). The image supports Linux amd64 and Windows amd64 on Server 2019, exposes Zen on port 8558, and reports Docker health through the stable `UnrealDDC --health` launcher command.
 
-The current image pins Zen 5.8.20. Linux uses Zen's ASIO HTTP server as an unprivileged UID 10001 process. Windows uses the production-oriented `http.sys` server and runs as `ContainerAdministrator`.
+The image selects the newest stable Zen release matching `ZEN_VERSION` whenever the container starts. Linux uses Zen's ASIO HTTP server as an unprivileged UID 10001 process. Windows uses the production-oriented `http.sys` server and runs as `ContainerAdministrator`.
 
 ## Runtime acquisition
 
-Epic distributes Zen from the private `EpicGames/zen` repository. To avoid redistributing licensed binaries, the public Docker image contains only the small `UnrealDDC` launcher. On the first start, the launcher:
+Epic distributes Zen from the private `EpicGames/zen` repository. To avoid redistributing licensed binaries, the public Docker image contains only the small `UnrealDDC` launcher. On every normal start, the launcher:
 
-1. downloads the platform-specific pinned release using an entitled GitHub account;
-2. verifies the release archive against its pinned SHA-256 checksum;
-3. extracts only `zenserver` and the `zen` client;
-4. records and revalidates both executable checksums on every start; and
-5. launches the stock server with the image command.
+1. queries the available releases using an entitled GitHub account and selects the newest stable version matching `ZEN_VERSION`;
+2. downloads the platform-specific archive when that version is not already installed;
+3. verifies the archive against the SHA-256 digest published by GitHub;
+4. extracts only `zenserver` and the `zen` client;
+5. records and revalidates both executable checksums; and
+6. publishes the selected installation for the health probe before launching the stock server.
 
-The verified installation is kept in a volume. Later containers reuse it without credentials. Concurrent first starts are serialized by a lock in that shared volume, and a failed or corrupt download is never published as an installation.
+Verified, versioned installations are kept in a volume and reused. Credentials are required on each start because release discovery is authenticated; they are removed from the Zen child process environment. Concurrent installations are serialized by a bounded, cancellable lock in that shared volume, and a failed or corrupt download is never published as an installation.
 
 Transient transport, timeout, rate-limit, and server-side download failures are retried four times with bounded exponential backoff. Authentication and entitlement failures fail immediately with a focused diagnostic.
 
@@ -31,29 +32,17 @@ The GitHub account must be linked to an Epic Games account and able to read `Epi
 
 ## Run on Linux
 
-Create the volumes and bootstrap the licensed installation once. The `--powercycle` command initializes Zen and exits:
+Create the volumes and start the service:
 
 ```bash
 docker volume create unreal-ddc-install
 docker volume create unreal-ddc-data
-docker run --rm \
-  --env UNREAL_CREDENTIALS_USR \
-  --env UNREAL_CREDENTIALS_PSW \
-  --volume unreal-ddc-install:/unreal-ddc/install \
-  --volume unreal-ddc-data:/unreal-ddc/data \
-  faulo/unreal-ddc:latest-linux \
-  --powercycle --data-dir=/unreal-ddc/data --http=asio \
-  --no-sentry --no-log-file --detach=false \
-  --status-panel=false --enable-execution-history=false --register-server=false
-```
-
-Start the service without forwarding credentials into its container configuration:
-
-```bash
 docker run --detach \
   --name unreal-ddc \
   --restart unless-stopped \
   --publish 8558:8558 \
+  --env UNREAL_CREDENTIALS_USR \
+  --env UNREAL_CREDENTIALS_PSW \
   --volume unreal-ddc-install:/unreal-ddc/install \
   --volume unreal-ddc-data:/unreal-ddc/data \
   faulo/unreal-ddc:latest-linux
@@ -66,28 +55,33 @@ The equivalent PowerShell commands for a Windows-container daemon are:
 ```powershell
 docker volume create unreal-ddc-install
 docker volume create unreal-ddc-data
-docker run --rm `
-    --env UNREAL_CREDENTIALS_USR `
-    --env UNREAL_CREDENTIALS_PSW `
-    --volume unreal-ddc-install:C:/unreal-ddc/install `
-    --volume unreal-ddc-data:C:/unreal-ddc/data `
-    faulo/unreal-ddc:latest-windows-ltsc2019 `
-    --powercycle --data-dir=C:/unreal-ddc/data --http=httpsys `
-    --no-sentry --no-log-file --detach=false `
-    --status-panel=false --enable-execution-history=false --register-server=false
-
 docker run --detach `
     --name unreal-ddc `
     --restart unless-stopped `
     --publish 8558:8558 `
+    --env UNREAL_CREDENTIALS_USR `
+    --env UNREAL_CREDENTIALS_PSW `
     --volume unreal-ddc-install:C:/unreal-ddc/install `
     --volume unreal-ddc-data:C:/unreal-ddc/data `
     faulo/unreal-ddc:latest-windows-ltsc2019
 ```
 
-`UNREAL_CREDENTIALS_USR` is the GitHub username and `UNREAL_CREDENTIALS_PSW` is its token. They must be supplied together and are used only when the pinned installation is absent or fails checksum validation. They are removed from the Zen child process environment and are never placed in a URL, image layer, or installation marker.
+`UNREAL_CREDENTIALS_USR` is the GitHub username and `UNREAL_CREDENTIALS_PSW` is its token. They must be supplied together on every normal start so the launcher can check the private release feed. They are removed from the Zen child process environment and are never placed in a URL, image layer, or installation marker.
 
-Additional container arguments replace the default command and are forwarded unchanged to `zenserver`. Preserve `--dedicated`, an explicit `--port`, `--data-dir`, the platform's `--http` implementation, and `--detach=false` when defining a custom production command.
+The image has an empty Docker `CMD`. `UnrealDDC` supplies the production defaults and appends any explicitly provided container arguments to the `zenserver` command line. Zen's stdout and stderr are mirrored to the launcher streams and are therefore available through `docker logs`.
+
+## Runtime configuration
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ZEN_VERSION` | `5` | Semantic version selector. A selector without an operator is a caret range: `5`, `5.8`, and `5.8.20` mean `^5`, `^5.8`, and `^5.8.20`. Prefix a complete version with `=` for an exact release. |
+| `ZEN_PORT` | `8558` | Zen HTTP port and health-probe port. |
+| `ZEN_DATA_DIR` | platform data volume | Absolute Zen data directory. |
+| `ZEN_GC_DISKSIZE_SOFTLIMIT` | Zen default | Value for `--gc-disksize-softlimit`. Accepts bytes or decimal/IEC units such as `100GB`, `1000MB`, or `20GiB`. |
+| `ZEN_GC_LOW_DISKSPACE_THRESHOLD` | Zen default | Value for `--gc-low-diskspace-threshold`, using the same byte-size syntax. |
+| `ZEN_GC_CACHE_DURATION_SECONDS` | Zen default | Value for `--gc-cache-duration-seconds`. Accepts compact ISO-style durations without the leading `P`, including `10D` and `1Y60S`; `P` and `T` are also accepted. A year is 365 days. |
+
+Caret ranges use semantic compatibility bounds. For example, `^5.8` selects the newest available version greater than or equal to 5.8.0 and lower than 6.0.0. The launcher never selects drafts or prereleases.
 
 ## Connect Unreal Engine
 
@@ -121,7 +115,7 @@ pwsh common/test-images.ps1 -DockerContext garl -ExpectedOs linux -Image tmp/unr
 pwsh common/test-images.ps1 -DockerContext dende -ExpectedOs windows -Image tmp/unreal-ddc:latest
 ```
 
-The contract verifies the daemon OS, authenticated acquisition, exact Zen version, readiness, cache writes, clean shutdown, container replacement, credential-free restart, and persistent cache reads. GitHub Actions builds and publishes both platform variants; the `jenkins/docker-unreal-ddc` job runs this contract against both production hosts.
+The contract verifies the daemon OS, authenticated version discovery and acquisition, automatic upgrades, stable launcher health checks, environment normalization, log mirroring, cache writes, clean exit state, container replacement, and persistent cache reads. GitHub Actions builds and publishes both platform variants; the `jenkins/docker-unreal-ddc` job runs this contract against both production hosts.
 
 Explorer-oriented `docker-build-*.bat` and `docker-test-*.bat` entry points use the `linux` or `windows` Docker contexts and pause before closing.
 

@@ -14,15 +14,15 @@ interface IZenAssetDownloader {
 sealed class GitHubAssetDownloader : IZenAssetDownloader {
     const int MAX_ATTEMPTS = 4;
 
-    readonly HttpClient _client;
-    readonly Func<TimeSpan, CancellationToken, Task> _delay;
+    readonly HttpClient client;
+    readonly Func<TimeSpan, CancellationToken, Task> delay;
 
     public GitHubAssetDownloader(HttpClient client)
         : this(client, static (delay, cancellationToken) => Task.Delay(delay, cancellationToken)) { }
 
     internal GitHubAssetDownloader(HttpClient client, Func<TimeSpan, CancellationToken, Task> delay) {
-        _client = client;
-        _delay = delay;
+        this.client = client;
+        this.delay = delay;
     }
 
     public async Task DownloadAsync(ZenReleaseAsset asset, GitHubCredentials credentials, string destination, CancellationToken cancellationToken) {
@@ -32,11 +32,11 @@ sealed class GitHubAssetDownloader : IZenAssetDownloader {
                 return;
             } catch (Exception exception) when (attempt < MAX_ATTEMPTS && IsTransient(exception, cancellationToken)) {
                 File.Delete(destination);
-                var delay = TimeSpan.FromSeconds(1 << (attempt - 1));
-                Console.Error.WriteLine(
-                    $"docker-unreal-ddc: Zen download attempt {attempt}/{MAX_ATTEMPTS} failed ({exception.Message}); retrying in {delay.TotalSeconds:0} second(s)"
+                var retryDelay = TimeSpan.FromSeconds(1 << (attempt - 1));
+                await Console.Error.WriteLineAsync(
+                    $"docker-unreal-ddc: Zen download attempt {attempt}/{MAX_ATTEMPTS} failed ({exception.Message}); retrying in {retryDelay.TotalSeconds:0} second(s)"
                 );
-                await _delay(delay, cancellationToken);
+                await delay(retryDelay, cancellationToken);
             }
         }
 
@@ -44,14 +44,14 @@ sealed class GitHubAssetDownloader : IZenAssetDownloader {
     }
 
     async Task DownloadOnceAsync(ZenReleaseAsset asset, GitHubCredentials credentials, string destination, CancellationToken cancellationToken) {
-        var uri = new Uri($"https://api.github.com/repos/EpicGames/zen/releases/assets/{asset.Id}");
+        var uri = new Uri($"https://api.github.com/repos/EpicGames/zen/releases/assets/{asset.id}");
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/octet-stream"));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credentials.Token);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credentials.token);
         request.Headers.UserAgent.ParseAdd("docker-unreal-ddc/1.0");
         request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
 
-        using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         if (!response.IsSuccessStatusCode) {
             string detail = response.StatusCode is System.Net.HttpStatusCode.Unauthorized
                 or System.Net.HttpStatusCode.Forbidden
@@ -70,20 +70,11 @@ sealed class GitHubAssetDownloader : IZenAssetDownloader {
         if (cancellationToken.IsCancellationRequested) {
             return false;
         }
-        if (exception is TaskCanceledException) {
-            return true;
-        }
-        if (exception is IOException) {
-            return true;
-        }
-        if (exception is not HttpRequestException httpException) {
-            return false;
-        }
-
-        int? status = (int?)httpException.StatusCode;
-        return status is null
-               || status == 408
-               || status == 429
-               || status >= 500;
+        return exception switch {
+            TaskCanceledException => true,
+            IOException => true,
+            HttpRequestException httpException => (int?)httpException.StatusCode is null or 408 or 429 or >= 500,
+            _ => false
+        };
     }
 }
