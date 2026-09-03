@@ -159,7 +159,8 @@ if ($Pull) {
 }
 
 $configuration = Invoke-DockerOutput @('image', 'inspect', '--format', '{{json .Config}}', $Image) | ConvertFrom-Json
-if (@($configuration.Cmd).Count -ne 0) {
+$cmdProperty = $configuration.PSObject.Properties['Cmd']
+if ($null -ne $cmdProperty -and @($cmdProperty.Value).Count -ne 0) {
     throw "Image $Image must have an empty CMD"
 }
 if (@($configuration.Env | Where-Object { $_ -like 'ZEN_RELEASE_VERSION=*' }).Count -ne 0) {
