@@ -271,7 +271,7 @@ if ($null -eq $previousMinor) {
     throw 'The contract requires at least two stable Zen minor lines in major version 5'
 }
 $firstVersion = ($releases | Where-Object { $_.Version.Major -eq $previousMinor.Version.Major -and $_.Version.Minor -eq $previousMinor.Version.Minor } | Select-Object -First 1).Version
-$firstSelector = "=$firstVersion"
+$firstSelector = $firstVersion.ToString()
 $secondSelector = $latest.Version.Major.ToString()
 $firstZen = "$installPath/v$firstVersion/$platformName/$clientName"
 $secondZen = "$installPath/v$($latest.Version)/$platformName/$clientName"
@@ -292,7 +292,7 @@ try {
         '--env', "ZEN_VERSION=$firstSelector",
         '--env', 'ZEN_GC_DISKSIZE_SOFTLIMIT=100GB',
         '--env', 'ZEN_GC_LOW_DISKSPACE_THRESHOLD=1000MB',
-        '--env', 'ZEN_GC_CACHE_DURATION_SECONDS=1Y60S',
+        '--env', 'ZEN_GC_CACHE_DURATION=1Y60S',
         '--volume', "${installVolume}:${installPath}",
         '--volume', "${dataVolume}:${dataPath}",
         '--volume', "${credentialVolume}:${credentialPath}:ro",
