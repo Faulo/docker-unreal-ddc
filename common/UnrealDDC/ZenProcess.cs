@@ -19,6 +19,7 @@ static partial class ZenProcess {
         process.BeginErrorReadLine();
         using var shutdown = new ShutdownCoordinator(process, installation.client, installation.directory, port);
         await process.WaitForExitAsync();
+        await shutdown.WaitForPendingStopAsync();
         return process.ExitCode;
     }
 
@@ -95,6 +96,7 @@ static partial class ZenProcess {
         readonly PosixSignalRegistration? terminateRegistration;
         readonly PosixSignalRegistration? interruptRegistration;
         readonly ConsoleControlHandler? windowsHandler;
+        readonly TaskCompletionSource stopCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         int stopState;
 
         public ShutdownCoordinator(Process server, string client, string workingDirectory, int port) {
@@ -178,7 +180,8 @@ static partial class ZenProcess {
             } catch (Exception exception) {
                 Console.Error.WriteLineAsync("docker-unreal-ddc: failed to request Zen shutdown: " + exception.Message).GetAwaiter().GetResult();
             } finally {
-                Volatile.Write(ref stopState, stopped ? 2 : 0);
+                Volatile.Write(ref stopState, 2);
+                stopCompletion.TrySetResult();
             }
         }
 
@@ -191,12 +194,26 @@ static partial class ZenProcess {
             if (stopProcess is null) {
                 return false;
             }
-            if (stopProcess.WaitForExit(TimeSpan.FromSeconds(6))) {
-                return stopProcess.ExitCode == 0 && server.WaitForExit(TimeSpan.FromSeconds(2));
+
+            var timeout = Stopwatch.StartNew();
+            while (timeout.Elapsed < TimeSpan.FromSeconds(6)) {
+                if (server.WaitForExit(TimeSpan.FromMilliseconds(100))) {
+                    if (!stopProcess.HasExited) {
+                        stopProcess.Kill(true);
+                    }
+                    return true;
+                }
+                if (stopProcess.HasExited) {
+                    return stopProcess.ExitCode == 0 && server.WaitForExit(TimeSpan.FromSeconds(2));
+                }
             }
             stopProcess.Kill(true);
             return false;
         }
+
+        public Task WaitForPendingStopAsync() => Volatile.Read(ref stopState) == 0
+            ? Task.CompletedTask
+            : stopCompletion.Task;
 
         public void Dispose() {
             Console.CancelKeyPress -= cancelHandler;
