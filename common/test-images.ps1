@@ -81,6 +81,31 @@ function Remove-TestContainer {
     }
 }
 
+function Write-TestCredentialFile {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Container,
+
+        [Parameter(Mandatory)]
+        [string] $Path
+    )
+
+    if ($ExpectedOs -eq 'windows') {
+        $script = '[IO.File]::WriteAllText($env:UNREAL_DDC_TEST_CREDENTIAL_FILE, $env:UNREAL_CREDENTIALS_PSW)'
+        Invoke-Docker @(
+            'exec', '--env', 'UNREAL_CREDENTIALS_PSW', '--env', "UNREAL_DDC_TEST_CREDENTIAL_FILE=$Path", $Container,
+            'powershell', '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', $script
+        )
+        return
+    }
+
+    $script = 'umask 077; printf "%s" "$UNREAL_CREDENTIALS_PSW" > "$UNREAL_DDC_TEST_CREDENTIAL_FILE"'
+    Invoke-Docker @(
+        'exec', '--env', 'UNREAL_CREDENTIALS_PSW', '--env', "UNREAL_DDC_TEST_CREDENTIAL_FILE=$Path", $Container,
+        'sh', '-c', $script
+    )
+}
+
 function Get-ZenReleases {
     $headers = @{
         Accept = 'application/vnd.github+json'
@@ -228,10 +253,11 @@ if ($null -eq $previousMinor) {
     throw 'The contract requires at least two stable Zen minor lines in major version 5'
 }
 $firstVersion = ($releases | Where-Object { $_.Version.Major -eq $previousMinor.Version.Major -and $_.Version.Minor -eq $previousMinor.Version.Minor } | Select-Object -First 1).Version
-$firstSelector = "=$firstVersion"
+$firstSelector = $firstVersion.ToString()
 $secondSelector = $latest.Version.Major.ToString()
 $firstZen = "$installPath/v$firstVersion/$platformName/$clientName"
 $secondZen = "$installPath/v$($latest.Version)/$platformName/$clientName"
+$credentialFile = "$installPath/.test-unreal-credentials-psw"
 
 try {
     Invoke-Docker @('volume', 'create', $installVolume)
@@ -245,7 +271,7 @@ try {
         '--env', "ZEN_VERSION=$firstSelector",
         '--env', 'ZEN_GC_DISKSIZE_SOFTLIMIT=100GB',
         '--env', 'ZEN_GC_LOW_DISKSPACE_THRESHOLD=1000MB',
-        '--env', 'ZEN_GC_CACHE_DURATION_SECONDS=1Y60S',
+        '--env', 'ZEN_GC_CACHE_DURATION=1Y60S',
         '--volume', "${installVolume}:${installPath}",
         '--volume', "${dataVolume}:${dataPath}",
         $Image
@@ -288,6 +314,7 @@ try {
     if ($seededEntryCount -lt 64) {
         throw "Zen cache contains only $seededEntryCount entries after seeding"
     }
+    Write-TestCredentialFile $container $credentialFile
 
     Assert-CleanStop $container
     Remove-TestContainer $container
@@ -298,7 +325,7 @@ try {
         'run', '--detach',
         '--name', $container,
         '--env', 'UNREAL_CREDENTIALS_USR',
-        '--env', 'UNREAL_CREDENTIALS_PSW',
+        '--env', "UNREAL_CREDENTIALS_PSW_FILE=$credentialFile",
         '--env', "ZEN_VERSION=$secondSelector",
         '--volume', "${installVolume}:${installPath}",
         '--volume', "${dataVolume}:${dataPath}",
@@ -310,6 +337,25 @@ try {
     $upgradedEntryCount = Get-CacheEntryCount $container $secondZen
     if ($upgradedEntryCount -lt $seededEntryCount) {
         throw "Zen cache lost entries during upgrade: $seededEntryCount before, $upgradedEntryCount after"
+    }
+    Assert-CleanStop $container
+    Remove-TestContainer $container
+
+    # A verified active installation remains usable without credentials. This
+    # is an offline fallback; authenticated starts still check for updates.
+    Invoke-Docker @(
+        'run', '--detach',
+        '--name', $container,
+        '--env', "ZEN_VERSION=$secondSelector",
+        '--volume', "${installVolume}:${installPath}",
+        '--volume', "${dataVolume}:${dataPath}",
+        $Image
+    )
+    Wait-ContainerHealthy $container
+    Assert-StartedVersion $container $latest.Version
+    $offlineLogs = Invoke-DockerOutput @('logs', $container)
+    if ($offlineLogs -notmatch 'starting verified cached Epic Zen') {
+        throw "Credential-free restart did not report the verified-cache fallback:`n$offlineLogs"
     }
     Assert-CleanStop $container
     Remove-TestContainer $container
