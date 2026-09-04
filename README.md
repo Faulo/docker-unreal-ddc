@@ -2,7 +2,7 @@
 
 `faulo/unreal-ddc` runs Epic's Zen Storage Server as a persistent shared Unreal Engine Derived Data Cache (DDC). The image supports Linux amd64 and Windows amd64 on Server 2019, exposes Zen on port 8558, and reports Docker health through the stable `UnrealDDC --health` launcher command.
 
-The image selects the newest stable Zen release matching `ZEN_VERSION` whenever the container starts. Linux uses Zen's ASIO HTTP server as an unprivileged UID 10001 process. Windows uses the production-oriented `http.sys` server and runs as `ContainerAdministrator`.
+When credentials are configured, the image selects the newest stable Zen release matching `ZEN_VERSION` whenever the container starts. Linux uses Zen's ASIO HTTP server as an unprivileged UID 10001 process. Windows uses the production-oriented `http.sys` server and runs as `ContainerAdministrator`.
 
 ## Runtime acquisition
 
@@ -15,7 +15,7 @@ Epic distributes Zen from the private `EpicGames/zen` repository. To avoid redis
 5. records and revalidates both executable checksums; and
 6. publishes the selected installation for the health probe before launching the stock server.
 
-Verified, versioned installations are kept in a volume and reused. Credentials are required on each start because release discovery is authenticated; they are removed from the Zen child process environment. Concurrent installations are serialized by a bounded, cancellable lock in that shared volume, and a failed or corrupt download is never published as an installation.
+Verified, versioned installations are kept in a volume and reused. When no credentials are configured, the launcher revalidates the active cached installation's executable checksums and starts it without an update check if it matches `ZEN_VERSION`. Credentials are therefore required for the first installation, for every automatic update check, and whenever the selector changes to an uncached version. Concurrent installations are serialized by a bounded, cancellable lock in that shared volume, and a failed or corrupt download is never published as an installation.
 
 Transient transport, timeout, rate-limit, and server-side download failures are retried four times with bounded exponential backoff. Authentication and entitlement failures fail immediately with a focused diagnostic.
 
@@ -66,7 +66,68 @@ docker run --detach `
     faulo/unreal-ddc:latest-windows-ltsc2019
 ```
 
-`UNREAL_CREDENTIALS_USR` is the GitHub username and `UNREAL_CREDENTIALS_PSW` is its token. They must be supplied together on every normal start so the launcher can check the private release feed. They are removed from the Zen child process environment and are never placed in a URL, image layer, or installation marker.
+`UNREAL_CREDENTIALS_USR` is the GitHub username and `UNREAL_CREDENTIALS_PSW` is its token. Each value can instead be read from the file named by `UNREAL_CREDENTIALS_USR_FILE` or `UNREAL_CREDENTIALS_PSW_FILE`. Direct and `_FILE` forms may be mixed between the pair, but both forms of the same value are rejected. Missing, unreadable, and empty files fail without printing their path or contents. All four variables are removed from the Zen child process environment, and credential contents are never placed in a URL, image layer, installation marker, or log.
+
+## Credential files and Docker secrets
+
+For Linux Docker Compose, including a Portainer stack backed by a Compose file, mount the token as a service secret:
+
+```yaml
+services:
+  unreal-ddc:
+    image: faulo/unreal-ddc:latest-linux
+    restart: unless-stopped
+    ports:
+      - "8558:8558"
+    environment:
+      UNREAL_CREDENTIALS_USR: github-user
+      UNREAL_CREDENTIALS_PSW_FILE: /run/secrets/unreal_credentials_psw
+    secrets:
+      - unreal_credentials_psw
+    volumes:
+      - unreal-ddc-install:/unreal-ddc/install
+      - unreal-ddc-data:/unreal-ddc/data
+
+secrets:
+  unreal_credentials_psw:
+    file: ./unreal_credentials_psw.txt
+
+volumes:
+  unreal-ddc-install:
+  unreal-ddc-data:
+```
+
+For a Portainer-managed Swarm stack, create `unreal_credentials_psw` as a Portainer/Docker secret first and replace the top-level declaration with:
+
+```yaml
+secrets:
+  unreal_credentials_psw:
+    external: true
+```
+
+Windows Docker secrets require Swarm. The default Windows secret directory is `C:/ProgramData/Docker/secrets`; this Portainer-compatible stack fragment selects the Windows image and points the launcher at the mounted token:
+
+```yaml
+services:
+  unreal-ddc:
+    image: faulo/unreal-ddc:latest-windows-ltsc2019
+    environment:
+      UNREAL_CREDENTIALS_USR: github-user
+      UNREAL_CREDENTIALS_PSW_FILE: C:/ProgramData/Docker/secrets/unreal_credentials_psw
+    secrets:
+      - unreal_credentials_psw
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.platform.os == windows
+
+secrets:
+  unreal_credentials_psw:
+    external: true
+```
+
+Create the external secret through Portainer or with `docker secret create unreal_credentials_psw <token-file>`, then deploy the stack. For a standalone Windows container, bind-mount a read-only directory containing the token and set `UNREAL_CREDENTIALS_PSW_FILE` to that container path; standalone Compose secrets support Linux containers only. See Docker's [Compose secrets guide](https://docs.docker.com/compose/how-tos/use-secrets/) and [Windows Swarm secret notes](https://docs.docker.com/engine/swarm/secrets/#windows-support).
 
 The image has an empty Docker `CMD`. `UnrealDDC` supplies the production defaults and appends any explicitly provided container arguments to the `zenserver` command line. Zen's stdout and stderr are mirrored to the launcher streams and are therefore available through `docker logs`.
 
@@ -74,14 +135,14 @@ The image has an empty Docker `CMD`. `UnrealDDC` supplies the production default
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `ZEN_VERSION` | `5` | Semantic version selector. A selector without an operator is a caret range: `5`, `5.8`, and `5.8.20` mean `^5`, `^5.8`, and `^5.8.20`. Prefix a complete version with `=` for an exact release. |
+| `ZEN_VERSION` | `5` | Version prefix or exact semantic version. `5`/`5.*` selects the newest `5.x` release, `5.8`/`5.8.*` selects the newest `5.8.x` release, and `5.8.20` selects only that release. |
 | `ZEN_PORT` | `8558` | Zen HTTP port and health-probe port. |
 | `ZEN_DATA_DIR` | platform data volume | Absolute Zen data directory. |
 | `ZEN_GC_DISKSIZE_SOFTLIMIT` | Zen default | Value for `--gc-disksize-softlimit`. Accepts bytes or decimal/IEC units such as `100GB`, `1000MB`, or `20GiB`. |
 | `ZEN_GC_LOW_DISKSPACE_THRESHOLD` | Zen default | Value for `--gc-low-diskspace-threshold`, using the same byte-size syntax. |
-| `ZEN_GC_CACHE_DURATION_SECONDS` | Zen default | Value for `--gc-cache-duration-seconds`. Accepts compact ISO-style durations without the leading `P`, including `10D` and `1Y60S`; `P` and `T` are also accepted. A year is 365 days. |
+| `ZEN_GC_CACHE_DURATION` | Zen default | Value for `--gc-cache-duration-seconds`. Accepts compact ISO-style durations without the leading `P`, including `10D` and `1Y60S`; `P` and `T` are also accepted. A year is 365 days. |
 
-Caret ranges use semantic compatibility bounds. For example, `^5.8` selects the newest available version greater than or equal to 5.8.0 and lower than 6.0.0. The launcher never selects drafts or prereleases.
+Prefix selectors have strict component bounds: `5` is at least 5.0.0 and lower than 6.0.0, while `5.8` is at least 5.8.0 and lower than 5.9.0. The launcher never selects drafts or prereleases. Operator forms such as `^5` and `=5.8.20` are not supported.
 
 ## Connect Unreal Engine
 

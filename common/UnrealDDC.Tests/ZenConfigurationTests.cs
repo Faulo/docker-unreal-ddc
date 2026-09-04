@@ -12,7 +12,7 @@ public sealed class ZenConfigurationTests {
         EnvironmentVariableNames.ZEN_DATA_DIR,
         EnvironmentVariableNames.ZEN_GC_DISKSIZE_SOFTLIMIT,
         EnvironmentVariableNames.ZEN_GC_LOW_DISKSPACE_THRESHOLD,
-        EnvironmentVariableNames.ZEN_GC_CACHE_DURATION_SECONDS
+        EnvironmentVariableNames.ZEN_GC_CACHE_DURATION
     ];
     readonly Dictionary<string, string?> originalValues = new();
 
@@ -50,7 +50,7 @@ public sealed class ZenConfigurationTests {
     public void AddsNormalizedEnvironmentOptionsAndAdditionalArguments() {
         Environment.SetEnvironmentVariable(EnvironmentVariableNames.ZEN_GC_DISKSIZE_SOFTLIMIT, "100GB");
         Environment.SetEnvironmentVariable(EnvironmentVariableNames.ZEN_GC_LOW_DISKSPACE_THRESHOLD, "1000MB");
-        Environment.SetEnvironmentVariable(EnvironmentVariableNames.ZEN_GC_CACHE_DURATION_SECONDS, "1Y60S");
+        Environment.SetEnvironmentVariable(EnvironmentVariableNames.ZEN_GC_CACHE_DURATION, "1Y60S");
 
         var configuration = ZenConfiguration.FromEnvironment(Path.GetTempPath(), EZenPlatform.LINUX, ["--extra"]);
 

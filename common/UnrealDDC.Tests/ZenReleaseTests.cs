@@ -18,14 +18,21 @@ public sealed class ZenReleaseTests {
     }
 
     [TestCase("5", "5.0.0", true)]
-    [TestCase("5", "5.99.1", true)]
+    [TestCase("5.*", "5.99.1", true)]
     [TestCase("5", "6.0.0", false)]
-    [TestCase("5.8", "5.9.0", true)]
-    [TestCase("^5.8.20", "5.8.19", false)]
-    [TestCase("^5.8.20", "5.10.0", true)]
-    [TestCase("=5.7.4", "5.7.4", true)]
-    [TestCase("=5.7.4", "5.7.5", false)]
-    public void ParsesImplicitAndExplicitVersionRanges(string expression, string candidate, bool expected) {
+    [TestCase("5.8", "5.8.99", true)]
+    [TestCase("5.8.*", "5.9.0", false)]
+    [TestCase("5.8.20", "5.8.20", true)]
+    [TestCase("v5.8.20", "5.8.21", false)]
+    public void ParsesVersionPrefixesAndExactVersions(string expression, string candidate, bool expected) {
         Assert.That(ZenVersionRange.Parse(expression).Contains(Version.Parse(candidate)), Is.EqualTo(expected));
+    }
+
+    [TestCase("^5")]
+    [TestCase("=5.8.20")]
+    [TestCase("5.8.20.*")]
+    [TestCase("5.*.20")]
+    public void RejectsUnsupportedVersionSelectorSyntax(string expression) {
+        Assert.That(() => ZenVersionRange.Parse(expression), Throws.InvalidOperationException);
     }
 }

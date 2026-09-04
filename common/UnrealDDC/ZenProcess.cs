@@ -68,7 +68,9 @@ static partial class ZenProcess {
 
     internal static void RemoveCredentials(ProcessStartInfo start) {
         start.Environment.Remove(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR);
+        start.Environment.Remove(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR_FILE);
         start.Environment.Remove(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW);
+        start.Environment.Remove(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW_FILE);
     }
 
     internal static ProcessStartInfo CreateStopStartInfo(string client, string workingDirectory, int port) => CreateStartInfo(

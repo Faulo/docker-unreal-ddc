@@ -113,7 +113,7 @@ sealed partial record ZenConfiguration(IReadOnlyList<string> arguments, int port
     }
 
     static void AddDurationArgument(List<string> arguments) {
-        string? value = Environment.GetEnvironmentVariable(EnvironmentVariableNames.ZEN_GC_CACHE_DURATION_SECONDS);
+        string? value = Environment.GetEnvironmentVariable(EnvironmentVariableNames.ZEN_GC_CACHE_DURATION);
         if (!string.IsNullOrWhiteSpace(value)) {
             arguments.Add($"--gc-cache-duration-seconds={ParseDuration(value).ToString(CultureInfo.InvariantCulture)}");
         }

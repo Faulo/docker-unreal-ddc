@@ -22,19 +22,32 @@ static class Program {
                 return await ZenProcess.RunHealthAsync(activeInstallation, healthPort);
             }
 
-            var credentials = GitHubCredentials.FromEnvironment();
-            using var client = new HttpClient();
-            client.Timeout = TimeSpan.FromMinutes(15);
             var range = ZenVersionRange.Parse(Environment.GetEnvironmentVariable(EnvironmentVariableNames.ZEN_VERSION));
-            await Console.Out.WriteLineAsync($"docker-unreal-ddc: checking Epic Zen releases matching {range.displayName}");
-            var release = await new GitHubReleaseResolver(client).ResolveAsync(platform, range, credentials);
-            var installer = new ZenInstaller(
-                installRoot,
-                platform,
-                release,
-                new GitHubAssetDownloader(client)
-            );
-            var installation = await installer.PrepareAsync(credentials);
+            var credentials = GitHubCredentials.TryFromEnvironment();
+            ZenInstallation installation;
+            if (credentials is null) {
+                installation = ZenInstaller.ReadVerifiedActive(installRoot, platform);
+                if (!range.Contains(installation.version)) {
+                    throw new InvalidOperationException(
+                        $"The cached Epic Zen {installation.version} does not match {EnvironmentVariableNames.ZEN_VERSION}={range.displayName}; credentials are required to select another release"
+                    );
+                }
+                await Console.Out.WriteLineAsync(
+                    $"docker-unreal-ddc: credentials not configured; starting verified cached Epic Zen {installation.version} without an update check"
+                );
+            } else {
+                using var client = new HttpClient();
+                client.Timeout = TimeSpan.FromMinutes(15);
+                await Console.Out.WriteLineAsync($"docker-unreal-ddc: checking Epic Zen releases matching {range.displayName}");
+                var release = await new GitHubReleaseResolver(client).ResolveAsync(platform, range, credentials);
+                var installer = new ZenInstaller(
+                    installRoot,
+                    platform,
+                    release,
+                    new GitHubAssetDownloader(client)
+                );
+                installation = await installer.PrepareAsync(credentials);
+            }
             var configuration = ZenConfiguration.FromEnvironment(root, platform, arguments);
             await Console.Out.WriteLineAsync($"docker-unreal-ddc: starting Epic Zen {installation.version}");
             return await ZenProcess.RunAsync(installation, configuration.arguments, configuration.port);

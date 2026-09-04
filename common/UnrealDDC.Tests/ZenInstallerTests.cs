@@ -23,16 +23,34 @@ public sealed class ZenInstallerTests {
         var first = await installer.PrepareAsync(new GitHubCredentials("user", "token"));
         var second = await installer.PrepareAsync(new GitHubCredentials("user", "token"));
         var active = ZenInstaller.ReadActive(directory.path, platform);
+        var verified = ZenInstaller.ReadVerifiedActive(directory.path, platform);
 
         Assert.Multiple(() => {
             Assert.That(downloader.count, Is.EqualTo(1));
             Assert.That(first, Is.EqualTo(second));
             Assert.That(active, Is.EqualTo(second));
+            Assert.That(verified, Is.EqualTo(second));
             Assert.That(File.ReadAllText(first.server), Is.EqualTo("server-v1"));
             Assert.That(File.ReadAllText(first.client), Is.EqualTo("client-v1"));
             Assert.That(File.Exists(Path.Combine(first.directory, ".docker-unreal-ddc.json")), Is.True);
             Assert.That(File.Exists(Path.Combine(first.directory, "zen.zip")), Is.False);
         });
+    }
+
+    [Test]
+    public async Task RejectsModifiedBinaryForCredentialFreeRestart() {
+        using var directory = new TemporaryDirectory();
+        string installRoot = directory.path;
+        byte[] archive = CreateArchive(("zenserver", "server"), ("zen", "client"));
+        var release = CreateRelease(EZenPlatform.LINUX, archive, "zenserver", "zen");
+        var installer = new ZenInstaller(installRoot, EZenPlatform.LINUX, release, new MemoryDownloader(archive));
+        var installation = await installer.PrepareAsync(new GitHubCredentials("user", "token"));
+        await File.AppendAllTextAsync(installation.server, "tampered");
+
+        Assert.That(
+            () => ZenInstaller.ReadVerifiedActive(installRoot, EZenPlatform.LINUX),
+            Throws.TypeOf<InvalidDataException>().With.Message.Contains("checksum")
+        );
     }
 
     [Test]
