@@ -2,11 +2,11 @@
 
 `faulo/unreal-ddc` runs Epic's Zen Storage Server as a persistent shared Unreal Engine Derived Data Cache (DDC). The image supports Linux amd64 and Windows amd64 on Server 2019, exposes Zen on port 8558, and reports Docker health through the stable `UnrealDDC --health` launcher command.
 
-When credentials are configured, the image selects the newest stable Zen release matching `ZEN_VERSION` whenever the container starts. Linux uses Zen's ASIO HTTP server as an unprivileged UID 10001 process. Windows uses the production-oriented `http.sys` server and runs as `ContainerAdministrator`.
+When credentials are available, the image selects the newest stable Zen release matching `ZEN_VERSION` whenever the container starts. Without credentials it can restart a matching verified installation from the persistent install volume. Linux uses Zen's ASIO HTTP server as an unprivileged UID 10001 process. Windows uses the production-oriented `http.sys` server and runs as `ContainerAdministrator`.
 
 ## Runtime acquisition
 
-Epic distributes Zen from the private `EpicGames/zen` repository. To avoid redistributing licensed binaries, the public Docker image contains only the small `UnrealDDC` launcher. On every normal start, the launcher:
+Epic distributes Zen from the private `EpicGames/zen` repository. To avoid redistributing licensed binaries, the public Docker image contains only the small `UnrealDDC` launcher. When credentials are available, the launcher:
 
 1. queries the available releases using an entitled GitHub account and selects the newest stable version matching `ZEN_VERSION`;
 2. downloads the platform-specific archive when that version is not already installed;
@@ -15,7 +15,7 @@ Epic distributes Zen from the private `EpicGames/zen` repository. To avoid redis
 5. records and revalidates both executable checksums; and
 6. publishes the selected installation for the health probe before launching the stock server.
 
-Verified, versioned installations are kept in a volume and reused. When no credentials are configured, the launcher revalidates the active cached installation's executable checksums and starts it without an update check if it matches `ZEN_VERSION`. Credentials are therefore required for the first installation, for every automatic update check, and whenever the selector changes to an uncached version. Concurrent installations are serialized by a bounded, cancellable lock in that shared volume, and a failed or corrupt download is never published as an installation.
+Verified, versioned installations are kept in a volume and reused. A restart without credentials revalidates the active installation's executable checksums and starts it when its version matches `ZEN_VERSION`; credentials remain necessary for the initial installation, every automatic update check, and selecting an uncached version. All direct and file-backed credential variables are removed from the Zen child process environment. Concurrent installations are serialized by a bounded, cancellable lock in that shared volume, and a failed or corrupt download is never published as an installation.
 
 Transient transport, timeout, rate-limit, and server-side download failures are retried four times with bounded exponential backoff. Authentication and entitlement failures fail immediately with a focused diagnostic.
 
@@ -42,7 +42,8 @@ docker run --detach \
   --restart unless-stopped \
   --publish 8558:8558 \
   --env UNREAL_CREDENTIALS_USR \
-  --env UNREAL_CREDENTIALS_PSW \
+  --env UNREAL_CREDENTIALS_PSW_FILE=/run/secrets/unreal_credentials_psw \
+  --mount type=bind,source=/path/on/host/unreal_credentials_psw,target=/run/secrets/unreal_credentials_psw,readonly \
   --volume unreal-ddc-install:/unreal-ddc/install \
   --volume unreal-ddc-data:/unreal-ddc/data \
   faulo/unreal-ddc:latest-linux
@@ -50,17 +51,19 @@ docker run --detach \
 
 ## Run on Windows
 
-The equivalent PowerShell commands for a Windows-container daemon are:
+The equivalent PowerShell commands for a Windows-container daemon mount a secrets directory because Windows containers do not support binding an individual file:
 
 ```powershell
 docker volume create unreal-ddc-install
 docker volume create unreal-ddc-data
+$SecretsPath = (Resolve-Path .\secrets).Path
 docker run --detach `
     --name unreal-ddc `
     --restart unless-stopped `
     --publish 8558:8558 `
     --env UNREAL_CREDENTIALS_USR `
-    --env UNREAL_CREDENTIALS_PSW `
+    --env UNREAL_CREDENTIALS_PSW_FILE=C:/run/secrets/unreal_credentials_psw `
+    --mount "type=bind,source=$SecretsPath,target=C:/run/secrets,readonly" `
     --volume unreal-ddc-install:C:/unreal-ddc/install `
     --volume unreal-ddc-data:C:/unreal-ddc/data `
     faulo/unreal-ddc:latest-windows-ltsc2019
@@ -80,7 +83,7 @@ services:
     ports:
       - "8558:8558"
     environment:
-      UNREAL_CREDENTIALS_USR: github-user
+      UNREAL_CREDENTIALS_USR: ${UNREAL_CREDENTIALS_USR}
       UNREAL_CREDENTIALS_PSW_FILE: /run/secrets/unreal_credentials_psw
     secrets:
       - unreal_credentials_psw
@@ -90,7 +93,7 @@ services:
 
 secrets:
   unreal_credentials_psw:
-    file: ./unreal_credentials_psw.txt
+    file: ./secrets/unreal_credentials_psw
 
 volumes:
   unreal-ddc-install:
@@ -112,7 +115,7 @@ services:
   unreal-ddc:
     image: faulo/unreal-ddc:latest-windows-ltsc2019
     environment:
-      UNREAL_CREDENTIALS_USR: github-user
+      UNREAL_CREDENTIALS_USR: ${UNREAL_CREDENTIALS_USR}
       UNREAL_CREDENTIALS_PSW_FILE: C:/ProgramData/Docker/secrets/unreal_credentials_psw
     secrets:
       - unreal_credentials_psw
@@ -135,6 +138,8 @@ The image has an empty Docker `CMD`. `UnrealDDC` supplies the production default
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `UNREAL_CREDENTIALS_USR` / `UNREAL_CREDENTIALS_USR_FILE` | none | GitHub username or path to a file containing it. Set exactly one form when credentials are supplied. |
+| `UNREAL_CREDENTIALS_PSW` / `UNREAL_CREDENTIALS_PSW_FILE` | none | GitHub token or path to a file containing it. Set exactly one form when credentials are supplied. |
 | `ZEN_VERSION` | `5` | Version prefix or exact semantic version. `5`/`5.*` selects the newest `5.x` release, `5.8`/`5.8.*` selects the newest `5.8.x` release, and `5.8.20` selects only that release. |
 | `ZEN_PORT` | `8558` | Zen HTTP port and health-probe port. |
 | `ZEN_DATA_DIR` | platform data volume | Absolute Zen data directory. |

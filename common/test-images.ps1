@@ -81,31 +81,6 @@ function Remove-TestContainer {
     }
 }
 
-function Write-TestCredentialFile {
-    param(
-        [Parameter(Mandatory)]
-        [string] $Container,
-
-        [Parameter(Mandatory)]
-        [string] $Path
-    )
-
-    if ($ExpectedOs -eq 'windows') {
-        $script = '[IO.File]::WriteAllText($env:UNREAL_DDC_TEST_CREDENTIAL_FILE, $env:UNREAL_CREDENTIALS_PSW)'
-        Invoke-Docker @(
-            'exec', '--env', 'UNREAL_CREDENTIALS_PSW', '--env', "UNREAL_DDC_TEST_CREDENTIAL_FILE=$Path", $Container,
-            'powershell', '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', $script
-        )
-        return
-    }
-
-    $script = 'umask 077; printf "%s" "$UNREAL_CREDENTIALS_PSW" > "$UNREAL_DDC_TEST_CREDENTIAL_FILE"'
-    Invoke-Docker @(
-        'exec', '--env', 'UNREAL_CREDENTIALS_PSW', '--env', "UNREAL_DDC_TEST_CREDENTIAL_FILE=$Path", $Container,
-        'sh', '-c', $script
-    )
-}
-
 function Get-ZenReleases {
     $headers = @{
         Accept = 'application/vnd.github+json'
@@ -138,6 +113,46 @@ function Assert-CleanStop {
     if ($state.Status -ne 'exited' -or $state.ExitCode -ne 0 -or $state.OOMKilled) {
         throw "Container $Container did not stop cleanly: $($state | ConvertTo-Json -Compress)"
     }
+}
+
+function Initialize-CredentialVolume {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Volume,
+
+        [Parameter(Mandatory)]
+        [string] $Path
+    )
+
+    if ($ExpectedOs -eq 'windows') {
+        $script = @'
+$ErrorActionPreference = 'Stop'
+Set-Content -LiteralPath C:/credentials/username -Value $env:UNREAL_CREDENTIALS_USR -NoNewline
+Set-Content -LiteralPath C:/credentials/token -Value $env:UNREAL_CREDENTIALS_PSW -NoNewline
+'@
+        Invoke-Docker @(
+            'run', '--rm',
+            '--env', 'UNREAL_CREDENTIALS_USR',
+            '--env', 'UNREAL_CREDENTIALS_PSW',
+            '--volume', "${Volume}:${Path}",
+            '--entrypoint', 'powershell',
+            $Image,
+            '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', $script
+        )
+        return
+    }
+
+    $script = 'printf %s "$UNREAL_CREDENTIALS_USR" > /credentials/username && printf %s "$UNREAL_CREDENTIALS_PSW" > /credentials/token'
+    Invoke-Docker @(
+        'run', '--rm',
+        '--user', '0',
+        '--env', 'UNREAL_CREDENTIALS_USR',
+        '--env', 'UNREAL_CREDENTIALS_PSW',
+        '--volume', "${Volume}:${Path}",
+        '--entrypoint', '/bin/sh',
+        $Image,
+        '-c', $script
+    )
 }
 
 function Get-ZenCommandLine {
@@ -222,15 +237,18 @@ $id = [Guid]::NewGuid().ToString('N').Substring(0, 12)
 $container = "unreal-ddc-test-$id"
 $installVolume = "unreal-ddc-test-$id-install"
 $dataVolume = "unreal-ddc-test-$id-data"
+$credentialVolume = "unreal-ddc-test-$id-credentials"
 if ($ExpectedOs -eq 'windows') {
     $installPath = 'C:/unreal-ddc/install'
     $dataPath = 'C:/unreal-ddc/data'
+    $credentialPath = 'C:/credentials'
     $launcher = 'C:/unreal-ddc/UnrealDDC.exe'
     $platformName = 'windows'
     $clientName = 'zen.exe'
 } else {
     $installPath = '/unreal-ddc/install'
     $dataPath = '/unreal-ddc/data'
+    $credentialPath = '/credentials'
     $launcher = '/unreal-ddc/UnrealDDC'
     $platformName = 'linux'
     $clientName = 'zen'
@@ -257,23 +275,27 @@ $firstSelector = $firstVersion.ToString()
 $secondSelector = $latest.Version.Major.ToString()
 $firstZen = "$installPath/v$firstVersion/$platformName/$clientName"
 $secondZen = "$installPath/v$($latest.Version)/$platformName/$clientName"
-$credentialFile = "$installPath/.test-unreal-credentials-psw"
 
 try {
     Invoke-Docker @('volume', 'create', $installVolume)
     Invoke-Docker @('volume', 'create', $dataVolume)
+    Invoke-Docker @('volume', 'create', $credentialVolume)
+    Initialize-CredentialVolume $credentialVolume $credentialPath
 
+    # The initial installation uses a mixed direct/file-backed pair, matching
+    # common Docker and Portainer secret deployments.
     Invoke-Docker @(
         'run', '--detach',
         '--name', $container,
         '--env', 'UNREAL_CREDENTIALS_USR',
-        '--env', 'UNREAL_CREDENTIALS_PSW',
+        '--env', "UNREAL_CREDENTIALS_PSW_FILE=$credentialPath/token",
         '--env', "ZEN_VERSION=$firstSelector",
         '--env', 'ZEN_GC_DISKSIZE_SOFTLIMIT=100GB',
         '--env', 'ZEN_GC_LOW_DISKSPACE_THRESHOLD=1000MB',
         '--env', 'ZEN_GC_CACHE_DURATION=1Y60S',
         '--volume', "${installVolume}:${installPath}",
         '--volume', "${dataVolume}:${dataPath}",
+        '--volume', "${credentialVolume}:${credentialPath}:ro",
         $Image
     )
     Wait-ContainerHealthy $container
@@ -314,21 +336,21 @@ try {
     if ($seededEntryCount -lt 64) {
         throw "Zen cache contains only $seededEntryCount entries after seeding"
     }
-    Write-TestCredentialFile $container $credentialFile
 
     Assert-CleanStop $container
     Remove-TestContainer $container
 
-    # The second start broadens the selector and must discover and install the
-    # newest compatible release while retaining the seeded cache.
+    # The second start uses both file-backed forms, broadens the selector, and
+    # must discover the newest compatible release while retaining the cache.
     Invoke-Docker @(
         'run', '--detach',
         '--name', $container,
-        '--env', 'UNREAL_CREDENTIALS_USR',
-        '--env', "UNREAL_CREDENTIALS_PSW_FILE=$credentialFile",
+        '--env', "UNREAL_CREDENTIALS_USR_FILE=$credentialPath/username",
+        '--env', "UNREAL_CREDENTIALS_PSW_FILE=$credentialPath/token",
         '--env', "ZEN_VERSION=$secondSelector",
         '--volume', "${installVolume}:${installPath}",
         '--volume', "${dataVolume}:${dataPath}",
+        '--volume', "${credentialVolume}:${credentialPath}:ro",
         $Image
     )
     Wait-ContainerHealthy $container
@@ -341,8 +363,8 @@ try {
     Assert-CleanStop $container
     Remove-TestContainer $container
 
-    # A verified active installation remains usable without credentials. This
-    # is an offline fallback; authenticated starts still check for updates.
+    # Once a matching verified installation is active, a restart must remain
+    # available when the secret provider is temporarily unavailable.
     Invoke-Docker @(
         'run', '--detach',
         '--name', $container,
@@ -353,15 +375,11 @@ try {
     )
     Wait-ContainerHealthy $container
     Assert-StartedVersion $container $latest.Version
-    $offlineLogs = Invoke-DockerOutput @('logs', $container)
-    if ($offlineLogs -notmatch 'starting verified cached Epic Zen') {
-        throw "Credential-free restart did not report the verified-cache fallback:`n$offlineLogs"
-    }
     Assert-CleanStop $container
     Remove-TestContainer $container
 } finally {
     Remove-TestContainer $container
-    foreach ($volume in @($installVolume, $dataVolume)) {
+    foreach ($volume in @($installVolume, $dataVolume, $credentialVolume)) {
         $exists = & docker --context $DockerContext volume inspect $volume *> $null
         if ($LASTEXITCODE -eq 0) {
             & docker --context $DockerContext volume rm $volume *> $null

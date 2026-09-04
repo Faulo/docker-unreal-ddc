@@ -153,11 +153,7 @@ sealed class ZenInstaller(
     }
 
     public static ZenInstallation ReadActive(string installRoot, EZenPlatform platform) {
-        string platformName = platform switch {
-            EZenPlatform.LINUX => "linux",
-            EZenPlatform.WINDOWS => "windows",
-            _ => throw new ArgumentOutOfRangeException(nameof(platform), platform, "Unsupported Zen platform")
-        };
+        string platformName = PlatformName(platform);
         string path = ActivePath(installRoot, platform);
         var active = JsonSerializer.Deserialize<ZenActiveInstallation>(File.ReadAllText(path))
                      ?? throw new InvalidDataException("The active Zen installation marker is empty");
@@ -178,30 +174,20 @@ sealed class ZenInstaller(
     }
 
     public static ZenInstallation ReadVerifiedActive(string installRoot, EZenPlatform platform) {
-        var installation = ReadActive(installRoot, platform);
-        string markerPath = Path.Combine(installation.directory, MARKER_NAME);
-        ZenInstallationMarker? marker;
         try {
-            marker = JsonSerializer.Deserialize<ZenInstallationMarker>(File.ReadAllText(markerPath));
-        } catch (IOException exception) {
-            throw new InvalidDataException("The cached active Zen installation marker could not be read", exception);
-        } catch (JsonException exception) {
-            throw new InvalidDataException("The cached active Zen installation marker is invalid", exception);
+            var installation = ReadActive(installRoot, platform);
+            var marker = JsonSerializer.Deserialize<ZenInstallationMarker>(File.ReadAllText(Path.Combine(installation.directory, MARKER_NAME)))
+                         ?? throw new InvalidDataException("The active Zen installation validation marker is empty");
+            if (!string.Equals(marker.release, installation.version.ToString(), StringComparison.Ordinal)
+                || !string.Equals(marker.platform, PlatformName(platform), StringComparison.Ordinal)
+                || !string.Equals(marker.serverSha256, HashFile(installation.server), StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(marker.clientSha256, HashFile(installation.client), StringComparison.OrdinalIgnoreCase)) {
+                throw new InvalidDataException("The active Zen installation failed checksum validation");
+            }
+            return installation;
+        } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException) {
+            throw new InvalidDataException("The active Zen installation could not be validated", exception);
         }
-
-        string platformName = platform switch {
-            EZenPlatform.LINUX => "linux",
-            EZenPlatform.WINDOWS => "windows",
-            _ => throw new ArgumentOutOfRangeException(nameof(platform), platform, "Unsupported Zen platform")
-        };
-        if (marker is null
-            || !string.Equals(marker.release, installation.version.ToString(), StringComparison.Ordinal)
-            || !string.Equals(marker.platform, platformName, StringComparison.Ordinal)
-            || !string.Equals(marker.serverSha256, HashFile(installation.server), StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(marker.clientSha256, HashFile(installation.client), StringComparison.OrdinalIgnoreCase)) {
-            throw new InvalidDataException("The cached active Zen installation failed checksum validation");
-        }
-        return installation;
     }
 
     static string ActivePath(string installRoot, EZenPlatform platform) => Path.Combine(
@@ -212,6 +198,12 @@ sealed class ZenInstaller(
             _ => throw new ArgumentOutOfRangeException(nameof(platform), platform, "Unsupported Zen platform")
         }
     );
+
+    static string PlatformName(EZenPlatform platform) => platform switch {
+        EZenPlatform.LINUX => "linux",
+        EZenPlatform.WINDOWS => "windows",
+        _ => throw new ArgumentOutOfRangeException(nameof(platform), platform, "Unsupported Zen platform")
+    };
 
     static async Task ExtractAsync(string archivePath, string entryName, string destination, CancellationToken cancellationToken) {
         using var archive = ZipFile.OpenRead(archivePath);

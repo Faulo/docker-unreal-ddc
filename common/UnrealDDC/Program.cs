@@ -26,14 +26,9 @@ static class Program {
             var credentials = GitHubCredentials.TryFromEnvironment();
             ZenInstallation installation;
             if (credentials is null) {
-                installation = ZenInstaller.ReadVerifiedActive(installRoot, platform);
-                if (!range.Contains(installation.version)) {
-                    throw new InvalidOperationException(
-                        $"The cached Epic Zen {installation.version} does not match {EnvironmentVariableNames.ZEN_VERSION}={range.displayName}; credentials are required to select another release"
-                    );
-                }
+                installation = ResolveCachedInstallation(installRoot, platform, range);
                 await Console.Out.WriteLineAsync(
-                    $"docker-unreal-ddc: credentials not configured; starting verified cached Epic Zen {installation.version} without an update check"
+                    $"docker-unreal-ddc: using cached Epic Zen {installation.version} without checking for updates because credentials were not supplied"
                 );
             } else {
                 using var client = new HttpClient();
@@ -55,6 +50,24 @@ static class Program {
             await Console.Error.WriteLineAsync("docker-unreal-ddc: " + exception.Message);
             return 1;
         }
+    }
+
+    static ZenInstallation ResolveCachedInstallation(string installRoot, EZenPlatform platform, ZenVersionRange range) {
+        ZenInstallation installation;
+        try {
+            installation = ZenInstaller.ReadVerifiedActive(installRoot, platform);
+        } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) {
+            throw new InvalidOperationException(
+                "Zen update credentials are required because no verified cached installation is available",
+                exception
+            );
+        }
+        if (!range.Contains(installation.version)) {
+            throw new InvalidOperationException(
+                $"Zen update credentials are required because cached version {installation.version} does not match {range.displayName}"
+            );
+        }
+        return installation;
     }
 
     static string ResolveRoot(EZenPlatform platform) {
