@@ -1,25 +1,33 @@
 using System;
+using System.Collections.Generic;
 using NUnit.Framework;
 
 namespace UnrealDDC.Tests;
 
 [NonParallelizable]
 public sealed class ZenProcessTests {
-    string? originalUsername;
-    string? originalToken;
+    static readonly string[] credentialVariables = [
+        EnvironmentVariableNames.UNREAL_CREDENTIALS_USR,
+        EnvironmentVariableNames.UNREAL_CREDENTIALS_USR_FILE,
+        EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW,
+        EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW_FILE
+    ];
+    readonly Dictionary<string, string?> originalValues = new();
 
     [SetUp]
     public void SetCredentials() {
-        originalUsername = Environment.GetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR);
-        originalToken = Environment.GetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW);
-        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR, "user");
-        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW, "secret-token");
+        foreach (string variable in credentialVariables) {
+            originalValues[variable] = Environment.GetEnvironmentVariable(variable);
+            Environment.SetEnvironmentVariable(variable, "secret");
+        }
     }
 
     [TearDown]
     public void RestoreCredentials() {
-        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR, originalUsername);
-        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW, originalToken);
+        foreach ((string variable, string? value) in originalValues) {
+            Environment.SetEnvironmentVariable(variable, value);
+        }
+        originalValues.Clear();
     }
 
     [Test]
@@ -30,8 +38,9 @@ public sealed class ZenProcessTests {
             Assert.That(start.WorkingDirectory, Is.EqualTo("/working directory"));
             Assert.That(start.ArgumentList, Is.EqualTo(["--dedicated", "--data-dir=value with spaces"]));
             Assert.That(start.UseShellExecute, Is.False);
-            Assert.That(start.Environment.ContainsKey(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR), Is.False);
-            Assert.That(start.Environment.ContainsKey(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW), Is.False);
+            foreach (string variable in credentialVariables) {
+                Assert.That(start.Environment.ContainsKey(variable), Is.False, variable);
+            }
         });
     }
 
@@ -41,8 +50,9 @@ public sealed class ZenProcessTests {
         Assert.Multiple(() => {
             Assert.That(start.FileName, Is.EqualTo("zen"));
             Assert.That(start.ArgumentList, Is.EqualTo(["--no-sentry", "down", "--port=9123", "--force"]));
-            Assert.That(start.Environment.ContainsKey(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR), Is.False);
-            Assert.That(start.Environment.ContainsKey(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW), Is.False);
+            foreach (string variable in credentialVariables) {
+                Assert.That(start.Environment.ContainsKey(variable), Is.False, variable);
+            }
         });
     }
 }

@@ -2,11 +2,11 @@
 
 `faulo/unreal-ddc` runs Epic's Zen Storage Server as a persistent shared Unreal Engine Derived Data Cache (DDC). The image supports Linux amd64 and Windows amd64 on Server 2019, exposes Zen on port 8558, and reports Docker health through the stable `UnrealDDC --health` launcher command.
 
-The image selects the newest stable Zen release matching `ZEN_VERSION` whenever the container starts. Linux uses Zen's ASIO HTTP server as an unprivileged UID 10001 process. Windows uses the production-oriented `http.sys` server and runs as `ContainerAdministrator`.
+When credentials are available, the image selects the newest stable Zen release matching `ZEN_VERSION` whenever the container starts. Without credentials it can restart a matching verified installation from the persistent install volume. Linux uses Zen's ASIO HTTP server as an unprivileged UID 10001 process. Windows uses the production-oriented `http.sys` server and runs as `ContainerAdministrator`.
 
 ## Runtime acquisition
 
-Epic distributes Zen from the private `EpicGames/zen` repository. To avoid redistributing licensed binaries, the public Docker image contains only the small `UnrealDDC` launcher. On every normal start, the launcher:
+Epic distributes Zen from the private `EpicGames/zen` repository. To avoid redistributing licensed binaries, the public Docker image contains only the small `UnrealDDC` launcher. When credentials are available, the launcher:
 
 1. queries the available releases using an entitled GitHub account and selects the newest stable version matching `ZEN_VERSION`;
 2. downloads the platform-specific archive when that version is not already installed;
@@ -15,7 +15,7 @@ Epic distributes Zen from the private `EpicGames/zen` repository. To avoid redis
 5. records and revalidates both executable checksums; and
 6. publishes the selected installation for the health probe before launching the stock server.
 
-Verified, versioned installations are kept in a volume and reused. Credentials are required on each start because release discovery is authenticated; they are removed from the Zen child process environment. Concurrent installations are serialized by a bounded, cancellable lock in that shared volume, and a failed or corrupt download is never published as an installation.
+Verified, versioned installations are kept in a volume and reused. A restart without credentials revalidates the active installation's executable checksums and starts it when its version matches `ZEN_VERSION`; credentials remain necessary for the initial installation and update discovery. All direct and file-backed credential variables are removed from the Zen child process environment. Concurrent installations are serialized by a bounded, cancellable lock in that shared volume, and a failed or corrupt download is never published as an installation.
 
 Transient transport, timeout, rate-limit, and server-side download failures are retried four times with bounded exponential backoff. Authentication and entitlement failures fail immediately with a focused diagnostic.
 
@@ -42,7 +42,8 @@ docker run --detach \
   --restart unless-stopped \
   --publish 8558:8558 \
   --env UNREAL_CREDENTIALS_USR \
-  --env UNREAL_CREDENTIALS_PSW \
+  --env UNREAL_CREDENTIALS_PSW_FILE=/run/secrets/unreal_credentials_psw \
+  --mount type=bind,source=/path/on/host/unreal_credentials_psw,target=/run/secrets/unreal_credentials_psw,readonly \
   --volume unreal-ddc-install:/unreal-ddc/install \
   --volume unreal-ddc-data:/unreal-ddc/data \
   faulo/unreal-ddc:latest-linux
@@ -50,23 +51,71 @@ docker run --detach \
 
 ## Run on Windows
 
-The equivalent PowerShell commands for a Windows-container daemon are:
+The equivalent PowerShell commands for a Windows-container daemon mount a secrets directory because Windows containers do not support binding an individual file:
 
 ```powershell
 docker volume create unreal-ddc-install
 docker volume create unreal-ddc-data
+$SecretsPath = (Resolve-Path .\secrets).Path
 docker run --detach `
     --name unreal-ddc `
     --restart unless-stopped `
     --publish 8558:8558 `
     --env UNREAL_CREDENTIALS_USR `
-    --env UNREAL_CREDENTIALS_PSW `
+    --env UNREAL_CREDENTIALS_PSW_FILE=C:/run/secrets/unreal_credentials_psw `
+    --mount "type=bind,source=$SecretsPath,target=C:/run/secrets,readonly" `
     --volume unreal-ddc-install:C:/unreal-ddc/install `
     --volume unreal-ddc-data:C:/unreal-ddc/data `
     faulo/unreal-ddc:latest-windows-ltsc2019
 ```
 
-`UNREAL_CREDENTIALS_USR` is the GitHub username and `UNREAL_CREDENTIALS_PSW` is its token. They must be supplied together on every normal start so the launcher can check the private release feed. They are removed from the Zen child process environment and are never placed in a URL, image layer, or installation marker.
+`UNREAL_CREDENTIALS_USR` is the GitHub username and `UNREAL_CREDENTIALS_PSW` is its token. Each value can instead be read from the path named by its `_FILE` counterpart, and direct and file-backed values can be mixed. Setting both forms for one value is rejected. Missing, unreadable, and empty credential files fail without printing their contents. Credentials are removed from the Zen child process environment and are never placed in a URL, image layer, or installation marker.
+
+For Docker Compose, store the token in `./secrets/unreal_credentials_psw` and use:
+
+```yaml
+services:
+  unreal-ddc:
+    image: faulo/unreal-ddc:latest-linux
+    restart: unless-stopped
+    ports:
+      - "8558:8558"
+    environment:
+      UNREAL_CREDENTIALS_USR: ${UNREAL_CREDENTIALS_USR}
+      UNREAL_CREDENTIALS_PSW_FILE: /run/secrets/unreal_credentials_psw
+    secrets:
+      - unreal_credentials_psw
+    volumes:
+      - unreal-ddc-install:/unreal-ddc/install
+      - unreal-ddc-data:/unreal-ddc/data
+
+secrets:
+  unreal_credentials_psw:
+    file: ./secrets/unreal_credentials_psw
+
+volumes:
+  unreal-ddc-install:
+  unreal-ddc-data:
+```
+
+For a Portainer Swarm stack, create `unreal_credentials_psw` in Portainer and replace the top-level secret definition with `external: true`. Linux secrets use `/run/secrets/<name>`; Windows Swarm secrets use `C:/ProgramData/Docker/secrets/<name>`, so set `UNREAL_CREDENTIALS_PSW_FILE` to that Windows path. See Docker's [secrets documentation](https://docs.docker.com/engine/swarm/secrets/).
+
+A Windows Swarm or Portainer stack uses the same external secret with the Windows image and path:
+
+```yaml
+services:
+  unreal-ddc:
+    image: faulo/unreal-ddc:latest-windows-ltsc2019
+    environment:
+      UNREAL_CREDENTIALS_USR: ${UNREAL_CREDENTIALS_USR}
+      UNREAL_CREDENTIALS_PSW_FILE: C:/ProgramData/Docker/secrets/unreal_credentials_psw
+    secrets:
+      - unreal_credentials_psw
+
+secrets:
+  unreal_credentials_psw:
+    external: true
+```
 
 The image has an empty Docker `CMD`. `UnrealDDC` supplies the production defaults and appends any explicitly provided container arguments to the `zenserver` command line. Zen's stdout and stderr are mirrored to the launcher streams and are therefore available through `docker logs`.
 
@@ -74,6 +123,8 @@ The image has an empty Docker `CMD`. `UnrealDDC` supplies the production default
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `UNREAL_CREDENTIALS_USR` / `UNREAL_CREDENTIALS_USR_FILE` | none | GitHub username or path to a file containing it. Set exactly one form when credentials are supplied. |
+| `UNREAL_CREDENTIALS_PSW` / `UNREAL_CREDENTIALS_PSW_FILE` | none | GitHub token or path to a file containing it. Set exactly one form when credentials are supplied. |
 | `ZEN_VERSION` | `5` | Semantic version selector. A selector without an operator is a caret range: `5`, `5.8`, and `5.8.20` mean `^5`, `^5.8`, and `^5.8.20`. Prefix a complete version with `=` for an exact release. |
 | `ZEN_PORT` | `8558` | Zen HTTP port and health-probe port. |
 | `ZEN_DATA_DIR` | platform data volume | Absolute Zen data directory. |

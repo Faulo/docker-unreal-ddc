@@ -23,11 +23,13 @@ public sealed class ZenInstallerTests {
         var first = await installer.PrepareAsync(new GitHubCredentials("user", "token"));
         var second = await installer.PrepareAsync(new GitHubCredentials("user", "token"));
         var active = ZenInstaller.ReadActive(directory.path, platform);
+        var verifiedActive = ZenInstaller.ReadVerifiedActive(directory.path, platform);
 
         Assert.Multiple(() => {
             Assert.That(downloader.count, Is.EqualTo(1));
             Assert.That(first, Is.EqualTo(second));
             Assert.That(active, Is.EqualTo(second));
+            Assert.That(verifiedActive, Is.EqualTo(second));
             Assert.That(File.ReadAllText(first.server), Is.EqualTo("server-v1"));
             Assert.That(File.ReadAllText(first.client), Is.EqualTo("client-v1"));
             Assert.That(File.Exists(Path.Combine(first.directory, ".docker-unreal-ddc.json")), Is.True);
@@ -62,6 +64,11 @@ public sealed class ZenInstallerTests {
         var installer = new ZenInstaller(directory.path, EZenPlatform.LINUX, release, downloader);
         var installation = await installer.PrepareAsync(new GitHubCredentials("user", "token"));
         await File.AppendAllTextAsync(installation.server, "tampered");
+
+        Assert.That(
+            () => ZenInstaller.ReadVerifiedActive(directory.path, EZenPlatform.LINUX),
+            Throws.TypeOf<InvalidDataException>()
+        );
 
         var repaired = await installer.PrepareAsync(new GitHubCredentials("user", "token"));
 
