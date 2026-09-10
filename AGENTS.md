@@ -18,6 +18,10 @@ Keep Dockerfile comments focused on non-obvious constraints and reasons. Preserv
 
 Prefer rolling updates of dependencies over pinned and checksummed versions. Preserve native exit-code checks, and explicit error handling.
 
+Use the Idea MCP to inspect source files for warnings and optimizations. Lint the code.
+
+Use the patterns in `C:\Webserver\dockerfile-templates` when applicable.
+
 Update `README.md` whenever image contents, prerequisites, or public commands change.
 
 ### Build and validation
