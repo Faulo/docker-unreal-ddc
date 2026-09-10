@@ -1,18 +1,18 @@
-FROM mcr.microsoft.com/dotnet/sdk:9.0-bookworm-slim AS launcher
+FROM mcr.microsoft.com/dotnet/sdk:9.0-bookworm-slim AS build
 
-WORKDIR /source
-COPY common/UnrealDDC/ ./
-RUN dotnet publish UnrealDDC.csproj \
+WORKDIR /solution
+
+COPY . .
+
+RUN dotnet publish \
         --configuration Release \
         --runtime linux-x64 \
         --self-contained true \
         --property:PublishSingleFile=true \
         --property:InvariantGlobalization=true \
-        --property:DebugType=None \
-        --output /out && \
-    test "$(find /out -maxdepth 1 -type f | wc -l)" -eq 1
+        --property:DebugType=None
 
-FROM ubuntu:24.04
+FROM debian:bookworm-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
@@ -22,7 +22,7 @@ RUN apt-get update && \
     useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin unrealddc && \
     install -d -o 10001 -g 10001 /unreal-ddc /unreal-ddc/install /unreal-ddc/data
 
-COPY --from=launcher --chown=10001:10001 /out/UnrealDDC /unreal-ddc/UnrealDDC
+COPY --from=build --chown=10001:10001 /solution/common/UnrealDDC/bin/Release/net9.0/linux-x64/publish/UnrealDDC /unreal-ddc/UnrealDDC
 
 ENV UNREAL_DDC_ROOT=/unreal-ddc
 ENV HOME=/unreal-ddc
