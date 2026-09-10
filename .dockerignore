@@ -1,14 +1,15 @@
-**
-!common/
-!common/UnrealDDC/
-!common/UnrealDDC/**
-common/UnrealDDC/bin/
-common/UnrealDDC/bin/**
-common/UnrealDDC/obj/
-common/UnrealDDC/obj/**
+# == Windows ==
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# == .NET ==
+**/bin/
+**/obj/
+
+# == DevOps ==
 .git/
-.git/**
-!linux/
-!linux/Dockerfile
-!windows/
-!windows/Dockerfile
+.github/
+.jenkins/
+.idea/
