@@ -8,6 +8,10 @@ $RECYCLE.BIN/
 **/bin/
 **/obj/
 
+# == Java ==
+**/target/
+out/
+
 # == DevOps ==
 .ai/
-
+.reports/
