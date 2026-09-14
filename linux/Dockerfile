@@ -12,7 +12,7 @@ RUN dotnet publish \
         --property:InvariantGlobalization=true \
         --property:DebugType=None
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
@@ -39,5 +39,4 @@ EXPOSE 8558
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD ["/unreal-ddc/UnrealDDC", "--health"]
 
-ENTRYPOINT ["/unreal-ddc/UnrealDDC"]
-CMD []
+CMD ["/unreal-ddc/UnrealDDC"]
