@@ -25,7 +25,7 @@ param(
 BeforeAll {
     . (Join-Path $PSScriptRoot '../.jenkins/Docker.ps1')
 
-    $launcher = $Os -eq 'windows' ? 'C:/unreal-ddc/UnrealDDC.exe' : '/unreal-ddc/UnrealDDC'
+    $launcher = 'unreal-ddc'
 
     function Remove-TestContainer {
         param(
@@ -41,20 +41,45 @@ BeforeAll {
 }
 
 Describe "Unreal DDC runtime [$Context, $Image]" {
+    BeforeAll {
+        $imageConfiguration = Invoke-DockerOutput -Context $Context -Arguments @(
+            'image', 'inspect', '--format', '{{json .Config}}', $Image
+        ) | ConvertFrom-Json
+    }
+
+    It 'uses the appliance launcher as its exact entrypoint' {
+        ConvertTo-Json @($imageConfiguration.Entrypoint) -Compress | Should -Be '["unreal-ddc"]'
+    }
+
+    It 'uses only the server command as its default arguments' {
+        ConvertTo-Json @($imageConfiguration.Cmd) -Compress | Should -Be '["serve"]'
+    }
+
+    It 'uses the launcher health command as its exact healthcheck' {
+        ConvertTo-Json @($imageConfiguration.Healthcheck.Test) -Compress | Should -Be '["CMD","unreal-ddc","health"]'
+    }
+
     It 'uses the expected platform runtime' {
         if ($Os -eq 'linux') {
             Invoke-Docker -Context $Context -Arguments @(
-                'run', '--rm', $Image,
-                'grep', '--fixed-strings', 'VERSION_CODENAME=trixie', '/etc/os-release'
+                'run', '--rm', '--entrypoint', 'grep', $Image,
+                '--fixed-strings', 'VERSION_CODENAME=trixie', '/etc/os-release'
+            ) -RunArguments $DockerRunArguments
+        } else {
+            Invoke-Docker -Context $Context -Arguments @(
+                'run', '--rm', '--entrypoint', 'cmd.exe', $Image,
+                '/S', '/C', 'ver'
             ) -RunArguments $DockerRunArguments
         }
     }
 
-    It 'prints launcher version' {
-        Invoke-Docker -Context $Context -Arguments @(
-            'run', '--rm', $Image,
-            $launcher, '--launcher-version'
+    It 'reports launcher and Zen installation versions through the fixed entrypoint' {
+        $output = Invoke-DockerOutput -Context $Context -Arguments @(
+            'run', '--rm', $Image, 'version'
         ) -RunArguments $DockerRunArguments
+
+        $output | Should -Match '(?m)^Unreal DDC launcher: \d+\.\d+\.\d+'
+        $output | Should -Match '(?m)^Zen: not installed$'
     }
 }
 
@@ -103,6 +128,10 @@ Describe "Unreal DDC service [$Context, $Image]" {
             'inspect', '--format', '{{.State.Status}}|{{.State.Health.Status}}', $container
         ) | Should -Be 'running|healthy'
 
-        Invoke-Docker -Context $Context -Arguments @('exec', $container, $launcher, '--health')
+        Invoke-Docker -Context $Context -Arguments @('exec', $container, $launcher, 'health')
+
+        $version = Invoke-DockerOutput -Context $Context -Arguments @('exec', $container, $launcher, 'version')
+        $version | Should -Match '(?m)^Unreal DDC launcher: \d+\.\d+\.\d+'
+        $version | Should -Match '(?m)^Zen: \d+\.\d+\.\d+ \(installed, verified\)$'
     }
 }

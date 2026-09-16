@@ -1,6 +1,6 @@
 # Unreal DDC Docker Image
 
-`faulo/unreal-ddc` runs Epic's Zen Storage Server as a persistent shared Unreal Engine Derived Data Cache (DDC). The image supports Linux amd64 on Debian 13 (Trixie) and Windows amd64 on Server 2019, exposes Zen on port 8558, and reports Docker health through the stable `UnrealDDC --health` launcher command.
+`faulo/unreal-ddc` runs Epic's Zen Storage Server as a persistent shared Unreal Engine Derived Data Cache (DDC). The image supports Linux amd64 on Debian 13 (Trixie) and Windows amd64 on Server 2019, exposes Zen on port 8558, and reports Docker health through the stable `unreal-ddc health` launcher command.
 
 When credentials are available, the image selects the newest stable Zen release matching `ZEN_VERSION` whenever the container starts. Without credentials it can restart a matching verified installation from the persistent install volume. Linux uses Zen's ASIO HTTP server as an unprivileged UID 10001 process. Windows uses the production-oriented `http.sys` server and runs as `ContainerAdministrator`.
 
@@ -132,7 +132,7 @@ secrets:
 
 Create the external secret through Portainer or with `docker secret create unreal_credentials_psw <token-file>`, then deploy the stack. For a standalone Windows container, bind-mount a read-only directory containing the token and set `UNREAL_CREDENTIALS_PSW_FILE` to that container path; standalone Compose secrets support Linux containers only. See Docker's [Compose secrets guide](https://docs.docker.com/compose/how-tos/use-secrets/) and [Windows Swarm secret notes](https://docs.docker.com/engine/swarm/secrets/#windows-support).
 
-The image uses `UnrealDDC` as its default Docker `CMD`, so an explicit container command replaces the launcher. To pass arguments through to `zenserver`, invoke the launcher explicitly followed by those arguments. Zen's stdout and stderr are mirrored to the launcher streams and are therefore available through `docker logs`.
+The image is a dedicated appliance. Its fixed `unreal-ddc` entrypoint uses `serve` as the default command, so starting a container without an explicit command starts Zen server mode. The launcher accepts exactly `serve`, `health`, or `version`; it does not forward arbitrary arguments to `zenserver`. Docker's explicit `--entrypoint` option remains available for low-level diagnostics. `unreal-ddc version` reports the launcher version and whether a detected Zen installation is missing, verified, or invalid. Zen's stdout and stderr are mirrored to the launcher streams and are therefore available through `docker logs`.
 
 ## Runtime configuration
 

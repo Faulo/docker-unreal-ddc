@@ -22,21 +22,23 @@ RUN apt-get update && \
     useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin unrealddc && \
     install -d -o 10001 -g 10001 /unreal-ddc /unreal-ddc/install /unreal-ddc/data
 
-COPY --from=build --chown=10001:10001 /solution/common/UnrealDDC/bin/Release/net9.0/linux-x64/publish/UnrealDDC /unreal-ddc/UnrealDDC
+COPY --from=build --chown=10001:10001 /solution/common/UnrealDDC/bin/Release/net9.0/linux-x64/publish/UnrealDDC /unreal-ddc/unreal-ddc
 
 ENV UNREAL_DDC_ROOT=/unreal-ddc
 ENV HOME=/unreal-ddc
+ENV PATH="/unreal-ddc:${PATH}"
 ENV ZEN_VERSION=5
 
 USER 10001:10001
 WORKDIR /unreal-ddc
 
-RUN ./UnrealDDC --launcher-version
+RUN unreal-ddc version
 
 VOLUME ["/unreal-ddc/install", "/unreal-ddc/data"]
 EXPOSE 8558
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-    CMD ["/unreal-ddc/UnrealDDC", "--health"]
+    CMD ["unreal-ddc", "health"]
 
-CMD ["/unreal-ddc/UnrealDDC"]
+ENTRYPOINT ["unreal-ddc"]
+CMD ["serve"]

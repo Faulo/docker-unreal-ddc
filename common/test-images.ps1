@@ -222,9 +222,11 @@ if ($Pull) {
 }
 
 $configuration = Invoke-DockerOutput @('image', 'inspect', '--format', '{{json .Config}}', $Image) | ConvertFrom-Json
-$cmdProperty = $configuration.PSObject.Properties['Cmd']
-if ($null -ne $cmdProperty -and @($cmdProperty.Value).Count -ne 0) {
-    throw "Image $Image must have an empty CMD"
+if (Compare-Object @($configuration.Entrypoint) @('unreal-ddc') -SyncWindow 0) {
+    throw "Image $Image must use 'unreal-ddc' as its exact entrypoint"
+}
+if (Compare-Object @($configuration.Cmd) @('serve') -SyncWindow 0) {
+    throw "Image $Image must use only 'serve' as its default command"
 }
 if (@($configuration.Env | Where-Object { $_ -like 'ZEN_RELEASE_VERSION=*' }).Count -ne 0) {
     throw "Image $Image still exposes obsolete ZEN_RELEASE_VERSION"
@@ -242,21 +244,20 @@ if ($ExpectedOs -eq 'windows') {
     $installPath = 'C:/unreal-ddc/install'
     $dataPath = 'C:/unreal-ddc/data'
     $credentialPath = 'C:/credentials'
-    $launcher = 'C:/unreal-ddc/UnrealDDC.exe'
     $platformName = 'windows'
     $clientName = 'zen.exe'
 } else {
     $installPath = '/unreal-ddc/install'
     $dataPath = '/unreal-ddc/data'
     $credentialPath = '/credentials'
-    $launcher = '/unreal-ddc/UnrealDDC'
     $platformName = 'linux'
     $clientName = 'zen'
 }
 
-$expectedHealthcheck = @('CMD', $launcher, '--health')
+$launcher = 'unreal-ddc'
+$expectedHealthcheck = @('CMD', $launcher, 'health')
 if (Compare-Object @($configuration.Healthcheck.Test) $expectedHealthcheck -SyncWindow 0) {
-    throw "Image $Image must use '$launcher --health' as its healthcheck"
+    throw "Image $Image must use '$launcher health' as its healthcheck"
 }
 
 $releases = Get-ZenReleases
@@ -300,7 +301,7 @@ try {
     )
     Wait-ContainerHealthy $container
 
-    Invoke-Docker @('exec', $container, $launcher, '--health')
+    Invoke-Docker @('exec', $container, $launcher, 'health')
     Assert-StartedVersion $container $firstVersion
     $commandLine = Get-ZenCommandLine $container
     foreach ($expectedArgument in @(
@@ -354,7 +355,7 @@ try {
         $Image
     )
     Wait-ContainerHealthy $container
-    Invoke-Docker @('exec', $container, $launcher, '--health')
+    Invoke-Docker @('exec', $container, $launcher, 'health')
     Assert-StartedVersion $container $latest.Version
     $upgradedEntryCount = Get-CacheEntryCount $container $secondZen
     if ($upgradedEntryCount -lt $seededEntryCount) {

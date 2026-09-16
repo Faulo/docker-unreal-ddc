@@ -25,19 +25,21 @@ SHELL ["C:/Windows/System32/WindowsPowerShell/v1.0/powershell", "-ExecutionPolic
 USER ContainerAdministrator
 RUN New-Item -ItemType Directory -Path C:/unreal-ddc, C:/unreal-ddc/install, C:/unreal-ddc/data -Force | Out-Null
 
-COPY --from=build C:/solution/common/UnrealDDC/bin/Release/net9.0/win-x64/publish/UnrealDDC.exe C:/unreal-ddc/UnrealDDC.exe
+COPY --from=build C:/solution/common/UnrealDDC/bin/Release/net9.0/win-x64/publish/UnrealDDC.exe C:/unreal-ddc/unreal-ddc.exe
 
 ENV UNREAL_DDC_ROOT="C:\unreal-ddc"
+ENV PATH="C:\unreal-ddc;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0"
 ENV ZEN_VERSION=5
 
 WORKDIR C:/unreal-ddc
-RUN C:/unreal-ddc/UnrealDDC.exe --launcher-version; `
+RUN unreal-ddc version; `
     if ($LASTEXITCODE -ne 0) { throw 'UnrealDDC smoke check failed' }
 
 VOLUME ["C:/unreal-ddc/install", "C:/unreal-ddc/data"]
 EXPOSE 8558
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 `
-    CMD ["C:/unreal-ddc/UnrealDDC.exe", "--health"]
+    CMD ["unreal-ddc", "health"]
 
-CMD ["C:/unreal-ddc/UnrealDDC.exe"]
+ENTRYPOINT ["unreal-ddc"]
+CMD ["serve"]

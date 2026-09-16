@@ -47,16 +47,15 @@ public sealed class ZenConfigurationTests {
     }
 
     [Test]
-    public void AddsNormalizedEnvironmentOptionsAndAdditionalArguments() {
+    public void AddsNormalizedEnvironmentOptions() {
         Environment.SetEnvironmentVariable(EnvironmentVariableNames.ZEN_GC_DISKSIZE_SOFTLIMIT, "100GB");
         Environment.SetEnvironmentVariable(EnvironmentVariableNames.ZEN_GC_LOW_DISKSPACE_THRESHOLD, "1000MB");
         Environment.SetEnvironmentVariable(EnvironmentVariableNames.ZEN_GC_CACHE_DURATION, "1Y60S");
 
-        var configuration = ZenConfiguration.FromEnvironment(Path.GetTempPath(), EZenPlatform.LINUX, ["--extra"]);
+        var configuration = ZenConfiguration.FromEnvironment(Path.GetTempPath(), EZenPlatform.LINUX);
 
         Assert.That(configuration.arguments, Does.Contain("--gc-disksize-softlimit=100000000000"));
         Assert.That(configuration.arguments, Does.Contain("--gc-low-diskspace-threshold=1000000000"));
         Assert.That(configuration.arguments, Does.Contain("--gc-cache-duration-seconds=31536060"));
-        Assert.That(configuration.arguments[^1], Is.EqualTo("--extra"));
     }
 }

@@ -24,17 +24,28 @@ public sealed class ZenInstallerTests {
         var second = await installer.PrepareAsync(new GitHubCredentials("user", "token"));
         var active = ZenInstaller.ReadActive(directory.path, platform);
         var verified = ZenInstaller.ReadVerifiedActive(directory.path, platform);
+        var status = ZenInstaller.GetActiveStatus(directory.path, platform);
 
         Assert.Multiple(() => {
             Assert.That(downloader.count, Is.EqualTo(1));
             Assert.That(first, Is.EqualTo(second));
             Assert.That(active, Is.EqualTo(second));
             Assert.That(verified, Is.EqualTo(second));
+            Assert.That(status, Is.EqualTo(new ZenInstallationStatus(second.version, EZenInstallationState.VERIFIED)));
             Assert.That(File.ReadAllText(first.server), Is.EqualTo("server-v1"));
             Assert.That(File.ReadAllText(first.client), Is.EqualTo("client-v1"));
             Assert.That(File.Exists(Path.Combine(first.directory, ".docker-unreal-ddc.json")), Is.True);
             Assert.That(File.Exists(Path.Combine(first.directory, "zen.zip")), Is.False);
         });
+    }
+
+    [Test]
+    public void ReportsMissingInstallation() {
+        using var directory = new TemporaryDirectory();
+
+        var status = ZenInstaller.GetActiveStatus(directory.path, EZenPlatform.LINUX);
+
+        Assert.That(status, Is.EqualTo(new ZenInstallationStatus(null, EZenInstallationState.NOT_INSTALLED)));
     }
 
     [Test]
@@ -47,10 +58,15 @@ public sealed class ZenInstallerTests {
         var installation = await installer.PrepareAsync(new GitHubCredentials("user", "token"));
         await File.AppendAllTextAsync(installation.server, "tampered");
 
-        Assert.That(
-            () => ZenInstaller.ReadVerifiedActive(installRoot, EZenPlatform.LINUX),
-            Throws.TypeOf<InvalidDataException>().With.Message.Contains("checksum")
-        );
+        var status = ZenInstaller.GetActiveStatus(installRoot, EZenPlatform.LINUX);
+
+        Assert.Multiple(() => {
+            Assert.That(
+                () => ZenInstaller.ReadVerifiedActive(installRoot, EZenPlatform.LINUX),
+                Throws.TypeOf<InvalidDataException>().With.Message.Contains("checksum")
+            );
+            Assert.That(status, Is.EqualTo(new ZenInstallationStatus(installation.version, EZenInstallationState.INVALID)));
+        });
     }
 
     [Test]

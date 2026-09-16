@@ -21,6 +21,14 @@ sealed record ZenInstallationMarker(
 
 sealed record ZenActiveInstallation(string release, string platform, string serverFile, string clientFile, string version);
 
+enum EZenInstallationState {
+    NOT_INSTALLED,
+    VERIFIED,
+    INVALID
+}
+
+sealed record ZenInstallationStatus(Version? version, EZenInstallationState state);
+
 sealed class ZenInstaller(
     string installRoot,
     EZenPlatform platform,
@@ -187,6 +195,23 @@ sealed class ZenInstaller(
             return installation;
         } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException) {
             throw new InvalidDataException("The active Zen installation could not be validated", exception);
+        }
+    }
+
+    public static ZenInstallationStatus GetActiveStatus(string installRoot, EZenPlatform platform) {
+        if (!File.Exists(ActivePath(installRoot, platform))) {
+            return new ZenInstallationStatus(null, EZenInstallationState.NOT_INSTALLED);
+        }
+        try {
+            var installation = ReadVerifiedActive(installRoot, platform);
+            return new ZenInstallationStatus(installation.version, EZenInstallationState.VERIFIED);
+        } catch (InvalidDataException) {
+            try {
+                var installation = ReadActive(installRoot, platform);
+                return new ZenInstallationStatus(installation.version, EZenInstallationState.INVALID);
+            } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException) {
+                return new ZenInstallationStatus(null, EZenInstallationState.INVALID);
+            }
         }
     }
 

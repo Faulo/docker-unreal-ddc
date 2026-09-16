@@ -10,8 +10,7 @@ sealed partial record ZenConfiguration(IReadOnlyList<string> arguments, int port
 
     public static ZenConfiguration FromEnvironment(
         string root,
-        EZenPlatform platform,
-        IEnumerable<string> additionalArguments
+        EZenPlatform platform
     ) {
         int port = ParsePort(Environment.GetEnvironmentVariable(EnvironmentVariableNames.ZEN_PORT));
         string dataDirectory = Environment.GetEnvironmentVariable(EnvironmentVariableNames.ZEN_DATA_DIR)?.Trim()
@@ -35,7 +34,6 @@ sealed partial record ZenConfiguration(IReadOnlyList<string> arguments, int port
         AddSizeArgument(arguments, EnvironmentVariableNames.ZEN_GC_DISKSIZE_SOFTLIMIT, "--gc-disksize-softlimit");
         AddSizeArgument(arguments, EnvironmentVariableNames.ZEN_GC_LOW_DISKSPACE_THRESHOLD, "--gc-low-diskspace-threshold");
         AddDurationArgument(arguments);
-        arguments.AddRange(additionalArguments);
         return new ZenConfiguration(arguments, port);
     }
 
