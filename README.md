@@ -41,9 +41,8 @@ docker run --detach \
   --name unreal-ddc \
   --restart unless-stopped \
   --publish 8558:8558 \
-  --env UNREAL_CREDENTIALS_USR \
-  --env UNREAL_CREDENTIALS_PSW_FILE=/run/secrets/unreal_credentials_psw \
-  --mount type=bind,source=/path/on/host/unreal_credentials_psw,target=/run/secrets/unreal_credentials_psw,readonly \
+  --env UNREAL_CREDENTIALS_PAT_FILE=/run/secrets/github_unreal_ddc_pat \
+  --mount type=bind,source=/path/on/host/github_unreal_ddc_pat,target=/run/secrets/github_unreal_ddc_pat,readonly \
   --volume unreal-ddc-install:/unreal-ddc/install \
   --volume unreal-ddc-data:/unreal-ddc/data \
   faulo/unreal-ddc:latest-linux
@@ -61,15 +60,16 @@ docker run --detach `
     --name unreal-ddc `
     --restart unless-stopped `
     --publish 8558:8558 `
-    --env UNREAL_CREDENTIALS_USR `
-    --env UNREAL_CREDENTIALS_PSW_FILE=C:/run/secrets/unreal_credentials_psw `
+    --env UNREAL_CREDENTIALS_PAT_FILE=C:/run/secrets/github_unreal_ddc_pat `
     --mount "type=bind,source=$SecretsPath,target=C:/run/secrets,readonly" `
     --volume unreal-ddc-install:C:/unreal-ddc/install `
     --volume unreal-ddc-data:C:/unreal-ddc/data `
     faulo/unreal-ddc:latest-windows-ltsc2019
 ```
 
-`UNREAL_CREDENTIALS_USR` is the GitHub username and `UNREAL_CREDENTIALS_PSW` is its token. Each value can instead be read from the file named by `UNREAL_CREDENTIALS_USR_FILE` or `UNREAL_CREDENTIALS_PSW_FILE`. Direct and `_FILE` forms may be mixed between the pair, but both forms of the same value are rejected. Missing, unreadable, and empty files fail without printing their path or contents. All four variables are removed from the Zen child process environment, and credential contents are never placed in a URL, image layer, installation marker, or log.
+Set exactly one of `UNREAL_CREDENTIALS_PAT` or `UNREAL_CREDENTIALS_PAT_FILE`. The first contains a GitHub personal access token; the second names a file containing it. Empty or unreadable files fail without printing their path or contents. The launcher removes credential variables from Zen child processes, and credential contents are never placed in a URL, image layer, installation marker, or log.
+
+The former `UNREAL_CREDENTIALS_USR`/`UNREAL_CREDENTIALS_PSW` pair and their `_FILE` forms remain available temporarily. Legacy values must still form a complete pair, and each value must use either its direct or file form. The launcher rejects any mixture of PAT and legacy variables and warns when it uses the legacy pair. The legacy interface may be removed in the next major version; migrate deployments to PAT now.
 
 ## Credential files and Docker secrets
 
@@ -83,28 +83,27 @@ services:
     ports:
       - "8558:8558"
     environment:
-      UNREAL_CREDENTIALS_USR: ${UNREAL_CREDENTIALS_USR}
-      UNREAL_CREDENTIALS_PSW_FILE: /run/secrets/unreal_credentials_psw
+      UNREAL_CREDENTIALS_PAT_FILE: /run/secrets/github_unreal_ddc_pat
     secrets:
-      - unreal_credentials_psw
+      - github_unreal_ddc_pat
     volumes:
       - unreal-ddc-install:/unreal-ddc/install
       - unreal-ddc-data:/unreal-ddc/data
 
 secrets:
-  unreal_credentials_psw:
-    file: ./secrets/unreal_credentials_psw
+  github_unreal_ddc_pat:
+    file: ./secrets/github_unreal_ddc_pat
 
 volumes:
   unreal-ddc-install:
   unreal-ddc-data:
 ```
 
-For a Portainer-managed Swarm stack, create `unreal_credentials_psw` as a Portainer/Docker secret first and replace the top-level declaration with:
+For a Portainer-managed Swarm stack, create `github_unreal_ddc_pat` as a Portainer/Docker secret first and replace the top-level declaration with:
 
 ```yaml
 secrets:
-  unreal_credentials_psw:
+  github_unreal_ddc_pat:
     external: true
 ```
 
@@ -115,10 +114,9 @@ services:
   unreal-ddc:
     image: faulo/unreal-ddc:latest-windows-ltsc2019
     environment:
-      UNREAL_CREDENTIALS_USR: ${UNREAL_CREDENTIALS_USR}
-      UNREAL_CREDENTIALS_PSW_FILE: C:/ProgramData/Docker/secrets/unreal_credentials_psw
+      UNREAL_CREDENTIALS_PAT_FILE: C:/ProgramData/Docker/secrets/github_unreal_ddc_pat
     secrets:
-      - unreal_credentials_psw
+      - github_unreal_ddc_pat
     deploy:
       replicas: 1
       placement:
@@ -126,11 +124,11 @@ services:
           - node.platform.os == windows
 
 secrets:
-  unreal_credentials_psw:
+  github_unreal_ddc_pat:
     external: true
 ```
 
-Create the external secret through Portainer or with `docker secret create unreal_credentials_psw <token-file>`, then deploy the stack. For a standalone Windows container, bind-mount a read-only directory containing the token and set `UNREAL_CREDENTIALS_PSW_FILE` to that container path; standalone Compose secrets support Linux containers only. See Docker's [Compose secrets guide](https://docs.docker.com/compose/how-tos/use-secrets/) and [Windows Swarm secret notes](https://docs.docker.com/engine/swarm/secrets/#windows-support).
+Create the external secret through Portainer or with `docker secret create github_unreal_ddc_pat <token-file>`, then deploy the stack. For a standalone Windows container, bind-mount a read-only directory containing the token and set `UNREAL_CREDENTIALS_PAT_FILE` to that container path; standalone Compose secrets support Linux containers only. See Docker's [Compose secrets guide](https://docs.docker.com/compose/how-tos/use-secrets/) and [Windows Swarm secret notes](https://docs.docker.com/engine/swarm/secrets/#windows-support).
 
 The image is a dedicated appliance. Its fixed `unreal-ddc` entrypoint uses `serve` as the default command, so starting a container without an explicit command starts Zen server mode. The launcher accepts exactly `serve`, `health`, or `version`; it does not forward arbitrary arguments to `zenserver`. Docker's explicit `--entrypoint` option remains available for low-level diagnostics. `unreal-ddc version` reports the launcher version and whether a detected Zen installation is missing, verified, or invalid. Zen's stdout and stderr are mirrored to the launcher streams and are therefore available through `docker logs`.
 
@@ -138,8 +136,9 @@ The image is a dedicated appliance. Its fixed `unreal-ddc` entrypoint uses `serv
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `UNREAL_CREDENTIALS_USR` / `UNREAL_CREDENTIALS_USR_FILE` | none | GitHub username or path to a file containing it. Set exactly one form when credentials are supplied. |
-| `UNREAL_CREDENTIALS_PSW` / `UNREAL_CREDENTIALS_PSW_FILE` | none | GitHub token or path to a file containing it. Set exactly one form when credentials are supplied. |
+| `UNREAL_CREDENTIALS_PAT` / `UNREAL_CREDENTIALS_PAT_FILE` | none | GitHub token or path to a file containing it. Set exactly one form when credentials are supplied. |
+| `UNREAL_CREDENTIALS_USR` / `UNREAL_CREDENTIALS_USR_FILE` | none | Deprecated GitHub username or path to a file containing it. Requires the legacy token pair. |
+| `UNREAL_CREDENTIALS_PSW` / `UNREAL_CREDENTIALS_PSW_FILE` | none | Deprecated GitHub token or path to a file containing it. Requires the legacy username pair. |
 | `ZEN_VERSION` | `5` | Version prefix or exact semantic version. `5`/`5.*` selects the newest `5.x` release, `5.8`/`5.8.*` selects the newest `5.8.x` release, and `5.8.20` selects only that release. |
 | `ZEN_PORT` | `8558` | Zen HTTP port and health-probe port. |
 | `ZEN_DATA_DIR` | platform data volume | Absolute Zen data directory. |
@@ -174,7 +173,7 @@ docker --context garl build --tag tmp/unreal-ddc:latest --file linux/Dockerfile 
 docker --context dende build --tag tmp/unreal-ddc:latest --file windows/Dockerfile .
 ```
 
-With the two credential environment variables set, run the full image contract:
+With `UNREAL_CREDENTIALS_PAT` set, run the full image contract:
 
 ```powershell
 pwsh common/test-images.ps1 -DockerContext garl -ExpectedOs linux -Image tmp/unreal-ddc:latest

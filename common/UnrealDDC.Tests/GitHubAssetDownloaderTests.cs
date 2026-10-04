@@ -19,7 +19,7 @@ public sealed class GitHubAssetDownloaderTests {
         var asset = new ZenReleaseAsset(42, "zen.zip", "unused", "zenserver", "zen");
 
         string destination = Path.Combine(directory.path, "zen.zip");
-        await downloader.DownloadAsync(asset, new GitHubCredentials("user", "secret-token"), destination, CancellationToken.None);
+        await downloader.DownloadAsync(asset, new GitHubCredentials("secret-token"), destination, CancellationToken.None);
 
         Assert.Multiple(() => {
             Assert.That(handler.uri, Is.EqualTo(new Uri("https://api.github.com/repos/EpicGames/zen/releases/assets/42")));
@@ -40,7 +40,7 @@ public sealed class GitHubAssetDownloaderTests {
         var asset = new ZenReleaseAsset(42, "zen.zip", "unused", "zenserver", "zen");
 
         var exception = Assert.ThrowsAsync<HttpRequestException>(async () =>
-            await downloader.DownloadAsync(asset, new GitHubCredentials("user", "token"), Path.Combine(directory.path, "zen.zip"), CancellationToken.None));
+            await downloader.DownloadAsync(asset, new GitHubCredentials("token"), Path.Combine(directory.path, "zen.zip"), CancellationToken.None));
         Assert.Multiple(() => {
             Assert.That(exception!.Message, Does.Contain("EpicGames/zen"));
             Assert.That(handler.count, Is.EqualTo(1));
@@ -60,7 +60,7 @@ public sealed class GitHubAssetDownloaderTests {
         var asset = new ZenReleaseAsset(42, "zen.zip", "unused", "zenserver", "zen");
 
         string destination = Path.Combine(directory.path, "zen.zip");
-        await downloader.DownloadAsync(asset, new GitHubCredentials("user", "token"), destination, CancellationToken.None);
+        await downloader.DownloadAsync(asset, new GitHubCredentials("token"), destination, CancellationToken.None);
 
         Assert.Multiple(() => {
             Assert.That(handler.count, Is.EqualTo(2));

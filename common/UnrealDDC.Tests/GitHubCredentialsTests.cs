@@ -8,6 +8,8 @@ namespace UnrealDDC.Tests;
 [NonParallelizable]
 public sealed class GitHubCredentialsTests {
     static readonly string[] variables = [
+        EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT,
+        EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE,
         EnvironmentVariableNames.UNREAL_CREDENTIALS_USR,
         EnvironmentVariableNames.UNREAL_CREDENTIALS_USR_FILE,
         EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW,
@@ -38,7 +40,76 @@ public sealed class GitHubCredentialsTests {
 
     [Test]
     public void RequiresCredentialsForUpdateCheck() {
-        Assert.That(GitHubCredentials.FromEnvironment, Throws.InvalidOperationException);
+        Assert.That(GitHubCredentials.FromEnvironment, Throws.InvalidOperationException.With.Message.Contains(EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT));
+    }
+
+    [Test]
+    public void AcceptsDirectPatWithoutUsername() {
+        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT, "  direct-token  ");
+        Assert.That(GitHubCredentials.FromEnvironment().token, Is.EqualTo("direct-token"));
+    }
+
+    [Test]
+    public void AcceptsFileBackedPatWithoutUsername() {
+        using var directory = new TemporaryDirectory();
+        Environment.SetEnvironmentVariable(
+            EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE,
+            WriteFile(directory.path, "pat", " file-token\r\n")
+        );
+        Assert.That(GitHubCredentials.FromEnvironment().token, Is.EqualTo("file-token"));
+    }
+
+    [Test]
+    public void RejectsBothPatForms() {
+        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT, "direct-token");
+        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE, "missing-file");
+        Assert.That(GitHubCredentials.TryFromEnvironment, Throws.InvalidOperationException.With.Message.Contains(EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE));
+    }
+
+    [TestCase(EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT)]
+    [TestCase(EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE)]
+    public void RejectsEmptyPat(string variable) {
+        Environment.SetEnvironmentVariable(variable, " ");
+        Assert.That(GitHubCredentials.TryFromEnvironment, Throws.InvalidOperationException.With.Message.Contains(variable));
+    }
+
+    [Test]
+    public void RejectsUnreadablePatFileWithoutExposingItsPath() {
+        using var directory = new TemporaryDirectory();
+        string missingPath = Path.Combine(directory.path, "missing-pat");
+        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE, missingPath);
+        var exception = Assert.Throws<InvalidOperationException>(() => GitHubCredentials.TryFromEnvironment());
+        Assert.Multiple(() => {
+            Assert.That(exception!.Message, Does.Contain(EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE));
+            Assert.That(exception.Message, Does.Not.Contain(missingPath));
+        });
+    }
+
+    [Test]
+    public void RejectsEmptyPatFile() {
+        using var directory = new TemporaryDirectory();
+        Environment.SetEnvironmentVariable(
+            EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE,
+            WriteFile(directory.path, "pat", " \r\n")
+        );
+        Assert.That(GitHubCredentials.TryFromEnvironment, Throws.InvalidOperationException.With.Message.Contains("must not be empty"));
+    }
+
+    [TestCase(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR)]
+    [TestCase(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR_FILE)]
+    [TestCase(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW)]
+    [TestCase(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW_FILE)]
+    public void RejectsMixingPatAndLegacyVariablesBeforeReadingFiles(string legacyVariable) {
+        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT, "pat-token");
+        Environment.SetEnvironmentVariable(legacyVariable, "legacy-value");
+        Assert.That(GitHubCredentials.TryFromEnvironment, Throws.InvalidOperationException.With.Message.Contains(EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT));
+    }
+
+    [Test]
+    public void RejectsFileBackedPatMixedWithLegacyBeforeReadingEitherFile() {
+        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE, "missing-pat-file");
+        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR_FILE, "missing-legacy-file");
+        Assert.That(GitHubCredentials.TryFromEnvironment, Throws.InvalidOperationException.With.Message.Contains(EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE));
     }
 
     [TestCase("user", null)]
@@ -55,8 +126,28 @@ public sealed class GitHubCredentialsTests {
         Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW, "  token  ");
         var credentials = GitHubCredentials.FromEnvironment();
         Assert.Multiple(() => {
-            Assert.That(credentials.username, Is.EqualTo("user"));
             Assert.That(credentials.token, Is.EqualTo("token"));
+        });
+    }
+
+    [Test]
+    public void WarnsAboutLegacyVariablesWithoutPrintingCredentialValues() {
+        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR, "secret-user");
+        Environment.SetEnvironmentVariable(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW, "secret-token");
+        using var warning = new StringWriter();
+        var originalError = Console.Error;
+        try {
+            Console.SetError(warning);
+            Assert.That(GitHubCredentials.TryFromEnvironment()!.token, Is.EqualTo("secret-token"));
+        } finally {
+            Console.SetError(originalError);
+        }
+        Assert.Multiple(() => {
+            Assert.That(warning.ToString(), Does.Contain(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR));
+            Assert.That(warning.ToString(), Does.Contain(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW));
+            Assert.That(warning.ToString(), Does.Contain("deprecated"));
+            Assert.That(warning.ToString(), Does.Not.Contain("secret-user"));
+            Assert.That(warning.ToString(), Does.Not.Contain("secret-token"));
         });
     }
 
@@ -71,7 +162,6 @@ public sealed class GitHubCredentialsTests {
         var credentials = GitHubCredentials.FromEnvironment();
 
         Assert.Multiple(() => {
-            Assert.That(credentials.username, Is.EqualTo("file-user"));
             Assert.That(credentials.token, Is.EqualTo("file-token"));
         });
     }
@@ -88,7 +178,6 @@ public sealed class GitHubCredentialsTests {
         var credentials = GitHubCredentials.FromEnvironment();
 
         Assert.Multiple(() => {
-            Assert.That(credentials.username, Is.EqualTo("direct-user"));
             Assert.That(credentials.token, Is.EqualTo("file-token"));
         });
     }
@@ -105,7 +194,6 @@ public sealed class GitHubCredentialsTests {
         var credentials = GitHubCredentials.FromEnvironment();
 
         Assert.Multiple(() => {
-            Assert.That(credentials.username, Is.EqualTo("file-user"));
             Assert.That(credentials.token, Is.EqualTo("direct-token"));
         });
     }

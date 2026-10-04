@@ -7,6 +7,8 @@ namespace UnrealDDC.Tests;
 [NonParallelizable]
 public sealed class ZenProcessTests {
     static readonly string[] credentialVariables = [
+        EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT,
+        EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE,
         EnvironmentVariableNames.UNREAL_CREDENTIALS_USR,
         EnvironmentVariableNames.UNREAL_CREDENTIALS_USR_FILE,
         EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW,

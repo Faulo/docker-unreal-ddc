@@ -20,8 +20,8 @@ public sealed class ZenInstallerTests {
         var downloader = new MemoryDownloader(archive);
         var installer = new ZenInstaller(directory.path, platform, release, downloader);
 
-        var first = await installer.PrepareAsync(new GitHubCredentials("user", "token"));
-        var second = await installer.PrepareAsync(new GitHubCredentials("user", "token"));
+        var first = await installer.PrepareAsync(new GitHubCredentials("token"));
+        var second = await installer.PrepareAsync(new GitHubCredentials("token"));
         var active = ZenInstaller.ReadActive(directory.path, platform);
         var verified = ZenInstaller.ReadVerifiedActive(directory.path, platform);
         var status = ZenInstaller.GetActiveStatus(directory.path, platform);
@@ -55,7 +55,7 @@ public sealed class ZenInstallerTests {
         byte[] archive = CreateArchive(("zenserver", "server"), ("zen", "client"));
         var release = CreateRelease(EZenPlatform.LINUX, archive, "zenserver", "zen");
         var installer = new ZenInstaller(installRoot, EZenPlatform.LINUX, release, new MemoryDownloader(archive));
-        var installation = await installer.PrepareAsync(new GitHubCredentials("user", "token"));
+        var installation = await installer.PrepareAsync(new GitHubCredentials("token"));
         await File.AppendAllTextAsync(installation.server, "tampered");
 
         var status = ZenInstaller.GetActiveStatus(installRoot, EZenPlatform.LINUX);
@@ -78,7 +78,7 @@ public sealed class ZenInstallerTests {
         var installer = new ZenInstaller(directory.path, EZenPlatform.LINUX, release, new MemoryDownloader(archive));
 
         var exception = Assert.ThrowsAsync<InvalidDataException>(async () =>
-            await installer.PrepareAsync(new GitHubCredentials("user", "token")));
+            await installer.PrepareAsync(new GitHubCredentials("token")));
 
         Assert.Multiple(() => {
             Assert.That(exception!.Message, Does.Contain("checksum mismatch"));
@@ -94,10 +94,10 @@ public sealed class ZenInstallerTests {
         var release = CreateRelease(EZenPlatform.LINUX, archive, "zenserver", "zen");
         var downloader = new MemoryDownloader(archive);
         var installer = new ZenInstaller(directory.path, EZenPlatform.LINUX, release, downloader);
-        var installation = await installer.PrepareAsync(new GitHubCredentials("user", "token"));
+        var installation = await installer.PrepareAsync(new GitHubCredentials("token"));
         await File.AppendAllTextAsync(installation.server, "tampered");
 
-        var repaired = await installer.PrepareAsync(new GitHubCredentials("user", "token"));
+        var repaired = await installer.PrepareAsync(new GitHubCredentials("token"));
 
         Assert.Multiple(() => {
             Assert.That(downloader.count, Is.EqualTo(2));

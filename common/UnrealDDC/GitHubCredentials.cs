@@ -4,13 +4,35 @@ using System.Security;
 
 namespace UnrealDDC;
 
-sealed record GitHubCredentials(string username, string token) {
+sealed record GitHubCredentials(string token) {
     public static GitHubCredentials FromEnvironment() => TryFromEnvironment()
         ?? throw new InvalidOperationException(
-            $"{EnvironmentVariableNames.UNREAL_CREDENTIALS_USR} and {EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW} are required to check for Zen updates"
+            $"{EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT} or {EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE} is required to check for Zen updates"
         );
 
     public static GitHubCredentials? TryFromEnvironment() {
+        bool hasPat = IsSet(EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT)
+                      || IsSet(EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE);
+        bool hasLegacy = IsSet(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR)
+                         || IsSet(EnvironmentVariableNames.UNREAL_CREDENTIALS_USR_FILE)
+                         || IsSet(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW)
+                         || IsSet(EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW_FILE);
+        if (hasPat && hasLegacy) {
+            throw new InvalidOperationException(
+                $"Do not mix {EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT} or {EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE} with {EnvironmentVariableNames.UNREAL_CREDENTIALS_USR}, {EnvironmentVariableNames.UNREAL_CREDENTIALS_USR_FILE}, {EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW}, or {EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW_FILE}"
+            );
+        }
+        if (hasPat) {
+            string pat = ResolveValue(
+                EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT,
+                EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE
+            )!;
+            return new GitHubCredentials(pat);
+        }
+        if (!hasLegacy) {
+            return null;
+        }
+
         string? username = ResolveValue(
             EnvironmentVariableNames.UNREAL_CREDENTIALS_USR,
             EnvironmentVariableNames.UNREAL_CREDENTIALS_USR_FILE
@@ -19,17 +41,19 @@ sealed record GitHubCredentials(string username, string token) {
             EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW,
             EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW_FILE
         );
-        if (username is null && token is null) {
-            return null;
-        }
         if (username is null || token is null) {
             throw new InvalidOperationException(
                 $"{EnvironmentVariableNames.UNREAL_CREDENTIALS_USR} and {EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW} must be supplied together, directly or through their _FILE variants"
             );
         }
 
-        return new GitHubCredentials(username, token);
+        Console.Error.WriteLine(
+            $"docker-unreal-ddc: {EnvironmentVariableNames.UNREAL_CREDENTIALS_USR}, {EnvironmentVariableNames.UNREAL_CREDENTIALS_USR_FILE}, {EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW}, and {EnvironmentVariableNames.UNREAL_CREDENTIALS_PSW_FILE} are deprecated; use {EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT} or {EnvironmentVariableNames.UNREAL_CREDENTIALS_PAT_FILE}"
+        );
+        return new GitHubCredentials(token);
     }
+
+    static bool IsSet(string variable) => Environment.GetEnvironmentVariable(variable) is not null;
 
     static string? ResolveValue(string directVariable, string fileVariable) {
         string? directValue = Environment.GetEnvironmentVariable(directVariable);

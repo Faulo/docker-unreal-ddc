@@ -43,7 +43,7 @@ public sealed class GitHubReleaseResolverTests {
         var release = await new GitHubReleaseResolver(client).ResolveAsync(
             EZenPlatform.LINUX,
             ZenVersionRange.Parse("5"),
-            new GitHubCredentials("user", "secret-token")
+            new GitHubCredentials("secret-token")
         );
 
         Assert.Multiple(() => {

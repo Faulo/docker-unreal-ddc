@@ -84,7 +84,7 @@ function Remove-TestContainer {
 function Get-ZenReleases {
     $headers = @{
         Accept = 'application/vnd.github+json'
-        Authorization = "Bearer $env:UNREAL_CREDENTIALS_PSW"
+        Authorization = "Bearer $env:UNREAL_CREDENTIALS_PAT"
         'X-GitHub-Api-Version' = '2022-11-28'
         'User-Agent' = 'docker-unreal-ddc-contract'
     }
@@ -127,13 +127,11 @@ function Initialize-CredentialVolume {
     if ($ExpectedOs -eq 'windows') {
         $script = @'
 $ErrorActionPreference = 'Stop'
-Set-Content -LiteralPath C:/credentials/username -Value $env:UNREAL_CREDENTIALS_USR -NoNewline
-Set-Content -LiteralPath C:/credentials/token -Value $env:UNREAL_CREDENTIALS_PSW -NoNewline
+Set-Content -LiteralPath C:/credentials/token -Value $env:UNREAL_CREDENTIALS_PAT -NoNewline
 '@
         Invoke-Docker @(
             'run', '--rm',
-            '--env', 'UNREAL_CREDENTIALS_USR',
-            '--env', 'UNREAL_CREDENTIALS_PSW',
+            '--env', 'UNREAL_CREDENTIALS_PAT',
             '--volume', "${Volume}:${Path}",
             '--entrypoint', 'powershell',
             $Image,
@@ -142,12 +140,11 @@ Set-Content -LiteralPath C:/credentials/token -Value $env:UNREAL_CREDENTIALS_PSW
         return
     }
 
-    $script = 'printf %s "$UNREAL_CREDENTIALS_USR" > /credentials/username && printf %s "$UNREAL_CREDENTIALS_PSW" > /credentials/token'
+    $script = 'printf %s "$UNREAL_CREDENTIALS_PAT" > /credentials/token'
     Invoke-Docker @(
         'run', '--rm',
         '--user', '0',
-        '--env', 'UNREAL_CREDENTIALS_USR',
-        '--env', 'UNREAL_CREDENTIALS_PSW',
+        '--env', 'UNREAL_CREDENTIALS_PAT',
         '--volume', "${Volume}:${Path}",
         '--entrypoint', '/bin/sh',
         $Image,
@@ -283,13 +280,11 @@ try {
     Invoke-Docker @('volume', 'create', $credentialVolume)
     Initialize-CredentialVolume $credentialVolume $credentialPath
 
-    # The initial installation uses a mixed direct/file-backed pair, matching
-    # common Docker and Portainer secret deployments.
+    # The initial installation uses the direct PAT form.
     Invoke-Docker @(
         'run', '--detach',
         '--name', $container,
-        '--env', 'UNREAL_CREDENTIALS_USR',
-        '--env', "UNREAL_CREDENTIALS_PSW_FILE=$credentialPath/token",
+        '--env', 'UNREAL_CREDENTIALS_PAT',
         '--env', "ZEN_VERSION=$firstSelector",
         '--env', 'ZEN_GC_DISKSIZE_SOFTLIMIT=100GB',
         '--env', 'ZEN_GC_LOW_DISKSPACE_THRESHOLD=1000MB',
@@ -341,13 +336,12 @@ try {
     Assert-CleanStop $container
     Remove-TestContainer $container
 
-    # The second start uses both file-backed forms, broadens the selector, and
+    # The second start uses the file-backed PAT, broadens the selector, and
     # must discover the newest compatible release while retaining the cache.
     Invoke-Docker @(
         'run', '--detach',
         '--name', $container,
-        '--env', "UNREAL_CREDENTIALS_USR_FILE=$credentialPath/username",
-        '--env', "UNREAL_CREDENTIALS_PSW_FILE=$credentialPath/token",
+        '--env', "UNREAL_CREDENTIALS_PAT_FILE=$credentialPath/token",
         '--env', "ZEN_VERSION=$secondSelector",
         '--volume', "${installVolume}:${installPath}",
         '--volume', "${dataVolume}:${dataPath}",

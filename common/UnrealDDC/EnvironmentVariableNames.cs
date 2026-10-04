@@ -1,6 +1,8 @@
 namespace UnrealDDC;
 
 static class EnvironmentVariableNames {
+    public const string UNREAL_CREDENTIALS_PAT = "UNREAL_CREDENTIALS_PAT";
+    public const string UNREAL_CREDENTIALS_PAT_FILE = "UNREAL_CREDENTIALS_PAT_FILE";
     public const string UNREAL_CREDENTIALS_USR = "UNREAL_CREDENTIALS_USR";
     public const string UNREAL_CREDENTIALS_USR_FILE = "UNREAL_CREDENTIALS_USR_FILE";
     public const string UNREAL_CREDENTIALS_PSW = "UNREAL_CREDENTIALS_PSW";
