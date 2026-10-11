@@ -163,7 +163,7 @@ The companion `faulo/unreal` image exposes this as its `UNREAL_DDC` setting. Zen
 Launcher unit tests do not download Zen or require Docker:
 
 ```powershell
-dotnet test docker-unreal-ddc.sln --configuration Release
+dotnet test docker-unreal-ddc.sln --configuration Release --logger junit
 ```
 
 Build only disposable candidates and always select the remote daemon explicitly:
@@ -187,3 +187,9 @@ Explorer-oriented `docker-build-*.bat` and `docker-test-*.bat` entry points use 
 ## Production host benchmark
 
 The measured deployment recommendation is **Garl**. Across three identical LAN trials, Garl averaged 100.4 requests/s and 45.9 MiB/s; Dende averaged 19.5 requests/s and 9.83 MiB/s. Garl was also 65 times faster at creating 4 KiB files in the data volume. The exact topology, raw trial values, storage results, support caveat, and reproduction command are in [the 2026-09-03 benchmark report](docs/benchmark-2026-09-03.md).
+
+Jenkins runs `dotnet test --logger junit` in the .NET 9 SDK container on a
+Linux agent and publishes `**/TestResults.xml` with its native `junit` step.
+Each test project writes its report to `TestResults/TestResults.xml`.
+Image integration tests continue to use the targets and variants configured
+in `.jenkins/pesterProject.properties`.
