@@ -55,11 +55,6 @@ Import-Module pwsh-dotenv -ErrorAction Stop
 $environmentPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.env'))
 $environment = Read-Dotenv -Path $environmentPath -AllowClobber
 
-# Jenkins currently stores this token as the password of a username/password credential.
-if ($null -eq $env:UNREAL_CREDENTIALS_PAT -and $null -ne $env:UNREAL_CREDENTIALS_PSW) {
-    $env:UNREAL_CREDENTIALS_PAT = $env:UNREAL_CREDENTIALS_PSW
-}
-
 if ([string]::IsNullOrWhiteSpace($Namespace)) {
     $Namespace = $environment.DOCKER_NAMESPACE
 }
