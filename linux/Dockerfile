@@ -4,13 +4,7 @@ WORKDIR /solution
 
 COPY . .
 
-RUN dotnet publish \
-        --configuration Release \
-        --runtime linux-x64 \
-        --self-contained true \
-        --property:PublishSingleFile=true \
-        --property:InvariantGlobalization=true \
-        --property:DebugType=None
+RUN dotnet publish --runtime linux-x64
 
 FROM debian:trixie-slim
 
@@ -22,11 +16,12 @@ RUN apt-get update && \
     useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin unrealddc && \
     install -d -o 10001 -g 10001 /unreal-ddc /unreal-ddc/install /unreal-ddc/data
 
-COPY --from=build --chown=10001:10001 /solution/common/UnrealDDC/bin/Release/net9.0/linux-x64/publish/UnrealDDC /unreal-ddc/unreal-ddc
+COPY --chmod=755 --from=build --chown=10001:10001 /solution/common/UnrealDDC/bin/Release/net9.0/linux-x64/publish/ /unreal-ddc/bin/
+RUN mv /unreal-ddc/bin/UnrealDDC /unreal-ddc/bin/unreal-ddc
 
 ENV UNREAL_DDC_ROOT=/unreal-ddc
 ENV HOME=/unreal-ddc
-ENV PATH="/unreal-ddc:${PATH}"
+ENV PATH="/unreal-ddc/bin:${PATH}"
 ENV ZEN_VERSION=5
 
 USER 10001:10001

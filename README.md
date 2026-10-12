@@ -25,10 +25,10 @@ The GitHub account must be linked to an Epic Games account and able to read `Epi
 
 | Platform | Explicit tag | Install volume | Data volume |
 | --- | --- | --- | --- |
-| Linux amd64 | `latest-linux` | `/unreal-ddc/install` | `/unreal-ddc/data` |
-| Windows amd64, Server 2019 | `latest-windows-ltsc2019` | `C:/unreal-ddc/install` | `C:/unreal-ddc/data` |
+| Linux amd64 | `latest-linux-amd64` | `/unreal-ddc/install` | `/unreal-ddc/data` |
+| Windows amd64, Server 2019 | `latest-windowsservercore-ltsc2019` | `C:/unreal-ddc/install` | `C:/unreal-ddc/data` |
 
-`latest` is a combined manifest that selects the matching image for the Docker host. The explicit tags are useful in deployment configuration. Always persist both paths. A Linux bind mount must be writable by UID/GID 10001; named volumes are initialized with the correct ownership automatically.
+`latest` is a combined manifest that selects the matching image for the Docker host. The target-specific tags contain only the selected platform image and its attestations. Use the Windows tag to select Server Core LTSC 2019 explicitly. Historical platform tags are retained but no longer updated. Always persist both paths. A Linux bind mount must be writable by UID/GID 10001; named volumes are initialized with the correct ownership automatically.
 
 ## Run on Linux
 
@@ -45,7 +45,7 @@ docker run --detach \
   --mount type=bind,source=/path/on/host/github_unreal_ddc_pat,target=/run/secrets/github_unreal_ddc_pat,readonly \
   --volume unreal-ddc-install:/unreal-ddc/install \
   --volume unreal-ddc-data:/unreal-ddc/data \
-  faulo/unreal-ddc:latest-linux
+  faulo/unreal-ddc:latest-linux-amd64
 ```
 
 ## Run on Windows
@@ -64,7 +64,7 @@ docker run --detach `
     --mount "type=bind,source=$SecretsPath,target=C:/run/secrets,readonly" `
     --volume unreal-ddc-install:C:/unreal-ddc/install `
     --volume unreal-ddc-data:C:/unreal-ddc/data `
-    faulo/unreal-ddc:latest-windows-ltsc2019
+    faulo/unreal-ddc:latest-windowsservercore-ltsc2019
 ```
 
 Set exactly one of `UNREAL_CREDENTIALS_PAT` or `UNREAL_CREDENTIALS_PAT_FILE`. The first contains a GitHub personal access token; the second names a file containing it. Empty or unreadable files fail without printing their path or contents. The launcher removes credential variables from Zen child processes, and credential contents are never placed in a URL, image layer, installation marker, or log.
@@ -78,7 +78,7 @@ For Linux Docker Compose, including a Portainer stack backed by a Compose file, 
 ```yaml
 services:
   unreal-ddc:
-    image: faulo/unreal-ddc:latest-linux
+    image: faulo/unreal-ddc:latest-linux-amd64
     restart: unless-stopped
     ports:
       - "8558:8558"
@@ -112,7 +112,7 @@ Windows Docker secrets require Swarm. The default Windows secret directory is `C
 ```yaml
 services:
   unreal-ddc:
-    image: faulo/unreal-ddc:latest-windows-ltsc2019
+    image: faulo/unreal-ddc:latest-windowsservercore-ltsc2019
     environment:
       UNREAL_CREDENTIALS_PAT_FILE: C:/ProgramData/Docker/secrets/github_unreal_ddc_pat
     secrets:
@@ -160,6 +160,8 @@ The companion `faulo/unreal` image exposes this as its `UNREAL_DDC` setting. Zen
 
 ## Build and validation
 
+Both Dockerfiles publish the complete solution and copy the launcher payload into the platform’s `/unreal-ddc/bin` or `C:/unreal-ddc/bin` directory on `PATH`. Publish settings live in the application project; test projects are excluded from publication. The public `unreal-ddc` command remains available, including through `docker exec`.
+
 Launcher unit tests do not download Zen or require Docker:
 
 ```powershell
@@ -188,8 +190,10 @@ Explorer-oriented `docker-build-*.bat` and `docker-test-*.bat` entry points use 
 
 The measured deployment recommendation is **Garl**. Across three identical LAN trials, Garl averaged 100.4 requests/s and 45.9 MiB/s; Dende averaged 19.5 requests/s and 9.83 MiB/s. Garl was also 65 times faster at creating 4 KiB files in the data volume. The exact topology, raw trial values, storage results, support caveat, and reproduction command are in [the 2026-09-03 benchmark report](docs/benchmark-2026-09-03.md).
 
-Jenkins runs `dotnet test --logger junit` in the .NET 9 SDK container on a
-Linux agent and publishes `**/TestResults.xml` with its native `junit` step.
+Jenkins runs Release unit tests with `--logger junit` in .NET 9 SDK containers on
+both Linux and Windows agents and publishes `**/TestResults.xml` with its native `junit` step.
 Each test project writes its report to `TestResults/TestResults.xml`.
 Image integration tests continue to use the targets and variants configured
 in `.jenkins/pesterProject.properties`.
+
+Docker publication uses the canonical `Faulo/workflows-docker@v3` caller and schema-version-2 `docker.json`. The shared workflow resolves the namespace and image from `.env`, builds Linux amd64 and Windows Server Core LTSC 2019, publishes `latest` and both target-specific tags, verifies digests/platform metadata, and deletes only its run-specific Windows staging tags. Docker Hub credentials must permit publication and staging-tag deletion. GitHub performs image builds and publication; Jenkins owns project tests. Pushes to `main`, manual dispatch, and the monthly schedule at 03:17 UTC on the first day trigger publication.
