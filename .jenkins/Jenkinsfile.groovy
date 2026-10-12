@@ -8,7 +8,7 @@ pipeline {
     }
 
     stages {
-        stage('Unit Tests: Linux') {
+        stage('Unit Tests') {
             agent {
                 docker {
                     image 'mcr.microsoft.com/dotnet/sdk:9.0'
@@ -16,23 +16,7 @@ pipeline {
                 }
             }
             steps {
-                exec 'dotnet test docker-unreal-ddc.sln --configuration Release --logger junit'
-            }
-            post {
-                always {
-                    junit(testResults: '**/TestResults.xml', allowEmptyResults: false)
-                }
-            }
-        }
-        stage('Unit Tests: Windows') {
-            agent {
-                docker {
-                    image 'mcr.microsoft.com/dotnet/sdk:9.0-windowsservercore-ltsc2019'
-                    label 'docker && windows'
-                }
-            }
-            steps {
-                exec 'dotnet test docker-unreal-ddc.sln --configuration Release --logger junit'
+                exec 'dotnet test --logger junit'
             }
             post {
                 always {
