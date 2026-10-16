@@ -28,7 +28,7 @@ The GitHub account must be linked to an Epic Games account and able to read `Epi
 | Linux amd64 | `latest-linux-amd64` | `/unreal-ddc/install` | `/unreal-ddc/data` |
 | Windows amd64, Server 2019 | `latest-windowsservercore-ltsc2019` | `C:/unreal-ddc/install` | `C:/unreal-ddc/data` |
 
-`latest` is a combined manifest that selects the matching image for the Docker host. The target-specific tags contain only the selected platform image and its attestations. Use the Windows tag to select Server Core LTSC 2019 explicitly. Historical platform tags are retained but no longer updated. Always persist both paths. A Linux bind mount must be writable by UID/GID 10001; named volumes are initialized with the correct ownership automatically.
+`latest` is a combined manifest that selects the matching image for the Docker host. The target-specific tags contain only the selected platform image and its attestations. Use the Windows tag to select Server Core LTSC 2019 explicitly. The intermediate `latest-linux` and `latest-windowsservercore` tags select their OS/family subset without pinning a leaf. Other unconfigured historical tags are retained but no longer updated. Always persist both paths. A Linux bind mount must be writable by UID/GID 10001; named volumes are initialized with the correct ownership automatically.
 
 ## Run on Linux
 
@@ -196,4 +196,4 @@ Each test project writes its report to `TestResults/TestResults.xml`.
 Image integration tests continue to use the targets and variants configured
 in `.jenkins/pesterProject.properties`.
 
-Docker publication uses the canonical `Faulo/workflows-docker@v3` caller and schema-version-2 `docker.json`. The shared workflow resolves the namespace and image from `.env`, builds Linux amd64 and Windows Server Core LTSC 2019, publishes `latest` and both target-specific tags, verifies digests/platform metadata, and deletes only its run-specific Windows staging tags. Docker Hub credentials must permit publication and staging-tag deletion. GitHub performs image builds and publication; Jenkins owns project tests. Pushes to `main`, manual dispatch, and the monthly schedule at 03:17 UTC on the first day trigger publication.
+Docker publication uses the canonical `Faulo/workflows-docker@v3` caller and schema-version-3 `docker.json` with recursive product, OS, and architecture or release axes. The shared workflow resolves the namespace and image from `.env`, builds Linux amd64 and Windows Server Core LTSC 2019, publishes `latest`, intermediate `latest-linux` / `latest-windowsservercore` indices, and both target-specific tags, verifies digests/platform metadata, and deletes only its run-specific Windows staging tags. Docker Hub credentials must permit publication and staging-tag deletion. GitHub performs image builds and publication; Jenkins owns project tests. Pushes to `main`, manual dispatch, and the monthly schedule at 03:17 UTC on the first day trigger publication.
