@@ -1,9 +1,6 @@
 # Unreal Engine shared derived data cache
 
-[![Docker](https://github.com/Faulo/docker-unreal-ddc/actions/workflows/docker.yml/badge.svg?branch=main)](https://github.com/Faulo/docker-unreal-ddc/actions/workflows/docker.yml)
-[![Docker image updated](https://img.shields.io/docker/last-updated/faulo/unreal-ddc/latest)](https://hub.docker.com/r/faulo/unreal-ddc/tags?name=latest)
-[![License: MIT](https://img.shields.io/github/license/Faulo/docker-unreal-ddc)](LICENSE)
-[![Platforms: Linux and Windows amd64](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20amd64-0078D4)](#available-images-and-persistent-paths)
+[![Docker](https://github.com/Faulo/docker-unreal-ddc/actions/workflows/docker.yml/badge.svg?branch=main)](https://github.com/Faulo/docker-unreal-ddc/actions/workflows/docker.yml) [![Docker image updated](https://img.shields.io/docker/last-updated/faulo/unreal-ddc/latest)](https://hub.docker.com/r/faulo/unreal-ddc/tags?name=latest) [![License: MIT](https://img.shields.io/github/license/Faulo/docker-unreal-ddc)](LICENSE) [![Platforms: Linux and Windows amd64](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20amd64-0078D4)](#available-images-and-persistent-paths)
 
 [`faulo/unreal-ddc`](https://hub.docker.com/r/faulo/unreal-ddc) runs Epic's Zen Storage Server as a persistent shared Unreal Engine Derived Data Cache (DDC). The image supports Linux amd64 on Debian 13 (Trixie) and Windows amd64 on Server 2019, exposes Zen on port 8558, and reports Docker health through the stable `unreal-ddc health` launcher command.
 
