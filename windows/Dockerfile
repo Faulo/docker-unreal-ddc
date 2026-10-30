@@ -18,6 +18,12 @@ FROM mcr.microsoft.com/windows/servercore:${OS_BASE}
 SHELL ["C:/Windows/System32/WindowsPowerShell/v1.0/powershell", "-ExecutionPolicy", "Bypass", "-NonInteractive", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
 
 USER ContainerAdministrator
+
+# Container startup must not retain host Code Integrity catalog allocations.
+# hadolint shell=powershell
+RUN & C:/Windows/System32/sc.exe config WinRM start= demand; `
+    if ($LASTEXITCODE -ne 0) { throw 'WinRM startup configuration failed' }
+
 # hadolint shell=powershell
 RUN New-Item -ItemType Directory -Path C:/unreal-ddc, C:/unreal-ddc/install, C:/unreal-ddc/data -Force | Out-Null
 

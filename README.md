@@ -6,6 +6,8 @@
 
 When credentials are available, the image selects the newest stable Zen release matching `ZEN_VERSION` whenever the container starts. Without credentials it can restart a matching verified installation from the persistent install volume. Linux uses Zen's ASIO HTTP server as an unprivileged UID 10001 process. Windows uses the production-oriented `http.sys` server and runs as `ContainerAdministrator`.
 
+In the Windows image, WinRM starts on demand to prevent container starts from retaining host Code Integrity pool memory. Start WinRM explicitly with `Start-Service WinRM` if needed.
+
 ## Runtime acquisition
 
 Epic distributes Zen from the private `EpicGames/zen` repository. To avoid redistributing licensed binaries, the public Docker image contains only the small `UnrealDDC` launcher. When credentials are available, the launcher:
