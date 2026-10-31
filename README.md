@@ -30,9 +30,9 @@ The GitHub account must be linked to an Epic Games account and able to read `Epi
 | Platform | Explicit tag | Install volume | Data volume |
 | --- | --- | --- | --- |
 | Linux amd64 | `latest-linux`, `latest-linux-amd64` | `/unreal-ddc/install` | `/unreal-ddc/data` |
-| Windows amd64, Server 2019 | `latest-windowsservercore`, `latest-windowsservercore-ltsc2019` | `C:/unreal-ddc/install` | `C:/unreal-ddc/data` |
+| Windows amd64, Server 2019 | `latest-windows`, `latest-windows-ltsc2019` | `C:/unreal-ddc/install` | `C:/unreal-ddc/data` |
 
-`latest` is a combined manifest that selects the matching image for the Docker host. The target-specific tags contain only the selected platform image and its attestations. Use the Windows tag to select Server Core LTSC 2019 explicitly. The intermediate `latest-linux` and `latest-windowsservercore` tags select their OS/family subset without pinning a leaf. Other unconfigured historical tags are retained but no longer updated. Always persist both paths. A Linux bind mount must be writable by UID/GID 10001; named volumes are initialized with the correct ownership automatically.
+`latest` is a combined manifest that selects the matching image for the Docker host. The target-specific tags contain only the selected platform image and its attestations. Use the Windows tag to select Server Core LTSC 2019 explicitly. The intermediate `latest-linux` and `latest-windows` tags select their OS/family subset without pinning a leaf. Other unconfigured historical tags are retained but no longer updated. Always persist both paths. A Linux bind mount must be writable by UID/GID 10001; named volumes are initialized with the correct ownership automatically.
 
 ## Quick start on Linux
 
