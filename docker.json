@@ -24,7 +24,7 @@
                         }
                     }
                 },
-                "windowsservercore": {
+                "windows": {
                     "runner": "windows-latest",
                     "matrix": {
                         "release": {
